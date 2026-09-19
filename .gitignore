@@ -1,0 +1,35 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+tests/artifacts/
+.DS_Store
+Thumbs.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.done
+.electron-cache/
+tests/eval/report.md
+tests/eval/suggest.md
+tests/eval/dbg.md
+tests/dbg*.mjs
+tests-tmp/
+*.py
+# ---- 密钥 / 证书（绝对不要提交）----
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+# ---- 覆盖率 / 编辑器 ----
+coverage/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.electron-cache*/

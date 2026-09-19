@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
+<title>HHmail — 前端 Demo</title>
+<style>
+  /* =====================================================================
+     DESIGN TOKENS（设计令牌）
+     —— 所有圆角、间距、颜色、字号集中在这里。
+     后续新增功能/组件请复用这些 token，保证整体一致；想统一改风格只改这里。
+     ===================================================================== */
+  :root {
+    /* 圆角——收敛版：卡片偏小，控件更小 */
+    --radius-xl: 14px;   /* 大面板 / 登录卡 */
+    --radius-lg: 10px;   /* 侧边栏 / 主区 / 卡片 */
+    --radius-md: 8px;    /* 输入框 / 头像 / 按钮 */
+    --radius-sm: 6px;    /* 小 chips / 标签 */
+
+    /* 间距标尺 */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+
+    /* 控件事 */
+    --ctrl-h: 34px;      /* 常用按钮/输入框高度 */
+    --avatar-list: 30px; /* 邮件列表头像 */
+
+    /* 颜色 */
+    --bg1: #eef3fb;
+    --bg2: #f6f7fb;
+    --bg3: #e9edf6;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10,132,255,.12);
+    --accent-green: #30d158;
+    --accent-orange: #ff9f0a;
+    --danger: #ff453a;
+    --text: #1c1c1e;
+    --text-2: #6e6e73;
+    --text-3: #a1a1a6;
+    --card: rgba(255,255,255,.78);
+    --card-solid: #ffffff;
+    --border: rgba(60,60,67,.12);
+    --shadow-sm: 0 1px 4px rgba(0,0,0,.05);
+    --shadow-md: 0 6px 20px rgba(0,0,0,.08);
+    --shadow-lg: 0 16px 48px rgba(0,0,0,.14);
+
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+      "PingFang SC", "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+    font-size: 13px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    color: var(--text);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #dce9ff 0%, transparent 55%),
+      radial-gradient(900px 500px at 110% 20%, #e8f7ef 0%, transparent 55%),
+      radial-gradient(800px 600px at 50% 120%, #f0e9ff 0%, transparent 55%),
+      linear-gradient(135deg, var(--bg1), var(--bg2) 50%, var(--bg3));
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input, textarea { font-family: inherit; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(60,60,67,.25); border-radius: 20px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- Shell ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    height: 100vh;
+    gap: 10px;
+    padding: 10px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    background: var(--card);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    padding: 12px 10px;
+    overflow: hidden;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 2px 6px 12px; }
+  .brand-logo {
+    width: 30px; height: 30px; border-radius: var(--radius-md);
+    background: linear-gradient(140deg, var(--accent), #5fc3ff);
+    display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 14px;
+    box-shadow: 0 4px 10px rgba(10,132,255,.3);
+  }
+  .brand-name { font-weight: 700; font-size: 13.5px; letter-spacing: .2px; }
+  .brand-sub { font-size: 10.5px; color: var(--text-3); margin-top: 0; }
+
+  .account-pill {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 8px; border-radius: var(--radius-md); background: rgba(10,132,255,.07);
+    border: 1px solid rgba(10,132,255,.15); margin-bottom: 10px;
+  }
+  .account-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 0 2px rgba(48,209,88,.2); flex: none; }
+  .account-pill .email { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .nav-group { display: flex; flex-direction: column; gap: 1px; }
+  .nav-label { font-size: 10px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; padding: 8px 8px 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 9px; border-radius: var(--radius-md); font-size: 12.5px; color: var(--text-2);
+    transition: background .13s, color .13s; position: relative;
+  }
+  .nav-item:hover { background: rgba(0,0,0,.04); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item .ico { width: 16px; height: 16px; display: grid; place-items: center; font-size: 13px; }
+  .nav-item .badge {
+    margin-left: auto; font-size: 10px; font-weight: 600; background: var(--accent); color: #fff;
+    border-radius: 20px; padding: 0 6px; min-width: 17px; text-align: center; line-height: 16px;
+  }
+  .nav-item .soon { margin-left: auto; font-size: 9.5px; color: var(--text-3); font-weight: 500; }
+  .sidebar-spacer { flex: 1; }
+  .sidebar-footer { font-size: 11px; color: var(--text-3); padding: 8px 8px 0; border-top: 1px solid var(--border); margin-top: 8px; }
+
+  /* ---------- Main ---------- */
+  .main {
+    display: flex; flex-direction: column;
+    background: var(--card);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .topbar .title { font-size: 16px; font-weight: 700; }
+  .topbar .title .sub { font-size: 11px; color: var(--text-3); font-weight: 500; margin-left: 6px; }
+  .searchbox {
+    flex: 1; min-width: 180px; display: flex; align-items: center; gap: 7px;
+    background: rgba(120,120,128,.11); border-radius: var(--radius-md); padding: 7px 11px;
+    height: var(--ctrl-h);
+  }
+  .searchbox input { background: none; border: none; outline: none; flex: 1; font-size: 12.5px; color: var(--text); }
+  .searchbox svg { opacity: .5; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: var(--ctrl-h);
+    padding: 0 13px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 600;
+    transition: background .13s, filter .13s; white-space: nowrap;
+  }
+  .btn.primary { background: linear-gradient(140deg, var(--accent), #5fb9ff); color: #fff; box-shadow: 0 4px 12px rgba(10,132,255,.3); }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .btn.ghost { background: rgba(120,120,128,.11); color: var(--text-2); }
+  .btn.ghost:hover { background: rgba(120,120,128,.2); }
+  .icon-btn {
+    width: var(--ctrl-h); height: var(--ctrl-h); border-radius: var(--radius-md); background: rgba(120,120,128,.1);
+    display: grid; place-items: center; transition: background .13s;
+  }
+  .icon-btn:hover { background: rgba(120,120,128,.2); }
+
+  /* ---------- Workspace ---------- */
+  .workspace {
+    display: grid; grid-template-columns: 340px 1fr; flex: 1; min-height: 0;
+  }
+
+  /* ---------- Mail list ---------- */
+  .list-pane { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
+  .list-toolbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .list-toolbar .seg { display: flex; background: rgba(120,120,128,.1); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
+  .list-toolbar .seg button { padding: 3px 10px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .list-toolbar .seg button.on { background: var(--card-solid); color: var(--text); box-shadow: var(--shadow-sm); }
+  .list-toolbar .muted { font-size: 11px; color: var(--text-3); }
+  .mail-list { flex: 1; overflow-y: auto; padding: 3px 6px; }
+  .mail-item {
+    display: flex; gap: 8px; padding: 7px 8px; border-radius: var(--radius-md); cursor: pointer;
+    transition: background .13s; align-items: flex-start; position: relative;
+  }
+  .mail-item:hover { background: rgba(0,0,0,.03); }
+  .mail-item.selected { background: var(--accent-soft); }
+  .avatar {
+    width: var(--avatar-list); height: var(--avatar-list); border-radius: var(--radius-md); flex: none;
+    display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 12px;
+  }
+  .mail-item-body { flex: 1; min-width: 0; }
+  .mail-item-top { display: flex; align-items: baseline; gap: 6px; }
+  .mail-item-top .from { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mail-item-top .time { margin-left: auto; font-size: 10.5px; color: var(--text-3); flex: none; }
+  .mail-item .subject { font-size: 12.5px; font-weight: 500; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mail-item.unread .subject { font-weight: 700; }
+  .mail-item .snippet { font-size: 11.5px; color: var(--text-2); margin-top: 1px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .mail-item .meta-row { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
+  .tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: var(--radius-sm); }
+  .tag.ai { background: rgba(10,132,255,.12); color: var(--accent); }
+  .tag.attach { background: rgba(255,159,10,.14); color: #c77c00; }
+  .mail-item.unread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex: none; }
+
+  /* ---------- Detail ---------- */
+  .detail-pane { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
+  .detail-empty { flex: 1; display: grid; place-items: center; color: var(--text-3); }
+  .detail-empty .inner { text-align: center; }
+  .detail-empty .inner .big { font-size: 40px; opacity: .5; margin-bottom: 8px; }
+  .detail-header { padding: 16px 20px 12px; border-bottom: 1px solid var(--border); }
+  .detail-title { font-size: 18px; font-weight: 700; line-height: 1.35; margin-bottom: 10px; }
+  .detail-from { display: flex; align-items: center; gap: 10px; }
+  .detail-from .avatar { width: 34px; height: 34px; border-radius: var(--radius-md); }
+  .detail-from .who { font-size: 13px; font-weight: 700; }
+  .detail-from .email { font-size: 11.5px; color: var(--text-2); margin-top: 1px; }
+  .detail-from .date { margin-left: auto; font-size: 11px; color: var(--text-3); text-align: right; }
+  .detail-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .chip-btn { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: var(--radius-md); font-size: 11.5px; font-weight: 600; background: rgba(120,120,128,.1); transition: background .13s; }
+  .chip-btn:hover { background: rgba(120,120,128,.18); }
+  .chip-btn.accent { background: var(--accent); color: #fff; }
+  .detail-body { padding: 14px 20px; line-height: 1.6; font-size: 13.5px; color: var(--text); white-space: pre-wrap; }
+  .detail-attach { padding: 0 20px 14px; }
+  .detail-attach .lbl { font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; }
+  .attach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
+  .attach-card { display: flex; align-items: center; gap: 7px; padding: 8px 9px; border-radius: var(--radius-md); background: rgba(120,120,128,.08); border: 1px solid var(--border); cursor: pointer; transition: background .13s; }
+  .attach-card:hover { background: rgba(120,120,128,.15); }
+  .attach-card .file-ico { width: 26px; height: 26px; border-radius: var(--radius-sm); display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; flex: none; }
+  .attach-card .name { font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-card .size { font-size: 10px; color: var(--text-3); }
+
+  /* ---------- AI Composer (detail bottom) ---------- */
+  .ai-compose { border-top: 1px solid var(--border); padding: 10px 20px 12px; background: rgba(255,255,255,.4); }
+  .ai-input-wrap { display: flex; align-items: flex-end; gap: 8px; background: var(--card-solid); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 10px; box-shadow: var(--shadow-sm); }
+  .ai-input-wrap textarea { flex: 1; border: none; outline: none; resize: none; font-size: 12.5px; line-height: 1.4; background: none; color: var(--text); max-height: 100px; }
+  .ai-send { width: 30px; height: 30px; border-radius: var(--radius-md); background: var(--accent); color: #fff; display: grid; place-items: center; }
+  .ai-send:disabled { opacity: .45; cursor: default; }
+  .ai-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .ai-suggestions button { font-size: 11px; padding: 4px 9px; border-radius: var(--radius-sm); background: rgba(10,132,255,.1); color: var(--accent); font-weight: 600; }
+  .ai-suggestions button:hover { background: rgba(10,132,255,.18); }
+
+  /* ---------- AI panel (right drawer) ---------- */
+  .ai-panel { position: fixed; inset: 10px; pointer-events: none; z-index: 50; display: flex; justify-content: flex-end; align-items: center; }
+  .ai-card {
+    pointer-events: auto; width: min(420px, 92vw); height: calc(100% - 20px); margin-right: 10px;
+    background: var(--card-solid); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;
+    transform: translateX(calc(100% + 30px)); transition: transform .28s cubic-bezier(.3,.9,.3,1);
+  }
+  .ai-panel.open .ai-card { transform: translateX(0); }
+  .ai-card-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .ai-card-head .ico { width: 28px; height: 28px; border-radius: var(--radius-md); background: linear-gradient(140deg, var(--accent), #64b6ff); color: #fff; display: grid; place-items: center; }
+  .ai-card-head .t { font-size: 14px; font-weight: 700; }
+  .ai-card-head .s { font-size: 10.5px; color: var(--text-3); }
+  .ai-card-head .x { margin-left: auto; }
+  .ai-card-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .ai-msg { margin-bottom: 12px; }
+  .ai-msg.user { display: flex; justify-content: flex-end; }
+  .ai-msg.user .bubble { max-width: 85%; background: var(--accent); color: #fff; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); padding: 8px 11px; font-size: 12.5px; line-height: 1.45; }
+  .ai-msg.ai .bubble { max-width: 95%; background: #f2f3f7; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm); padding: 10px 12px; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .ai-msg.ai .thinking { color: var(--text-3); font-size: 11.5px; font-style: italic; }
+  .ai-cites { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .ai-cite { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: var(--radius-sm); background: rgba(10,132,255,.06); cursor: pointer; }
+  .ai-cite:hover { background: rgba(10,132,255,.12); }
+  .ai-cite .n { font-size: 10.5px; color: var(--accent); font-weight: 700; }
+  .ai-cite .c { font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- Login screen ---------- */
+  .login { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgba(240,244,250,.6); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4); transition: opacity .4s; padding: 20px; }
+  .login.hidden { opacity: 0; pointer-events: none; }
+  .login-card { width: min(430px, 100%); background: var(--card-solid); border-radius: var(--radius-xl); border: 1px solid var(--border); box-shadow: var(--shadow-lg); padding: 32px 28px; text-align: center; }
+  .login-appicon { width: 60px; height: 60px; border-radius: var(--radius-lg); margin: 0 auto 16px; background: linear-gradient(140deg, var(--accent), #5fc3ff); color: #fff; display: grid; place-items: center; font-size: 26px; font-weight: 700; box-shadow: 0 10px 22px rgba(10,132,255,.35); }
+  .login h1 { font-size: 21px; font-weight: 800; }
+  .login .desc { font-size: 13px; color: var(--text-2); margin-top: 6px; line-height: 1.5; }
+  .device-code-wrap { margin: 20px auto 0; max-width: 300px; }
+  .device-code-wrap .lbl { font-size: 11px; color: var(--text-3); margin-bottom: 6px; }
+  .device-code { font-size: 22px; font-weight: 800; letter-spacing: 5px; background: rgba(120,120,128,.1); border-radius: var(--radius-md); padding: 10px; user-select: all; }
+  .login-actions { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+  .btn-primary { background: var(--accent); color: #fff; border-radius: var(--radius-md); padding: 12px; font-size: 14px; font-weight: 700; box-shadow: 0 8px 18px rgba(10,132,255,.3); }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-ghost { background: rgba(120,120,128,.12); color: var(--text); border-radius: var(--radius-md); padding: 11px; font-size: 13px; font-weight: 600; }
+  .btn-ghost:hover { background: rgba(120,120,128,.2); }
+  .login .foot { font-size: 10.5px; color: var(--text-3); margin-top: 18px; line-height: 1.5; }
+
+  /* ---------- Toast ---------- */
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 200; background: var(--text); color: #fff; border-radius: var(--radius-md); padding: 9px 16px; font-size: 12px; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 960px) { .app { grid-template-columns: 1fr; } .sidebar { display: none; } }
+  @media (max-width: 720px) { .workspace { grid-template-columns: 1fr; } .detail-pane { display: none; } }
+
+  /* ---------- Settings modal ---------- */
+  .settings { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; background: rgba(0,0,0,.25); backdrop-filter: blur(6px); opacity: 0; pointer-events: none; transition: opacity .25s; padding: 20px; }
+  .settings.open { opacity: 1; pointer-events: auto; }
+  .settings-card { width: min(500px, 100%); background: var(--card-solid); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); overflow: hidden; }
+  .settings-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .settings-head .t { font-size: 16px; font-weight: 700; }
+  .settings-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 18px; max-height: 70vh; overflow-y: auto; }
+  .settings-section .lbl { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .settings-row .name { font-size: 13px; flex: none; }
+  .settings-row .hint { font-size: 11px; color: var(--text-3); }
+  .settings-input { flex: 1; min-width: 0; height: var(--ctrl-h); padding: 0 11px; border-radius: var(--radius-md); border: 1px solid var(--border); background: rgba(120,120,128,.07); font-size: 12.5px; color: var(--text); outline: none; }
+  .settings-foot { display: flex; justify-content: space-between; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border); align-items: center; }
+  .settings-foot .btns { display: flex; gap: 10px; }
+  .segfull { display: flex; background: rgba(120,120,128,.1); border-radius: var(--radius-md); padding: 3px; gap: 3px; flex: 1; max-width: 200px; }
+  .segfull button { flex: 1; padding: 6px 0; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; color: var(--text-2); }
+  .segfull button.on { background: var(--card-solid); color: var(--text); box-shadow: var(--shadow-sm); }
+
+  /* ---------- Comfortable density（舒适档） ---------- */
+  body.comfortable { font-size: 13.5px; }
+  body.comfortable .app { gap: 14px; padding: 14px; grid-template-columns: 250px 1fr; }
+  body.comfortable .sidebar { padding: 18px 14px; }
+  body.comfortable .brand { padding: 4px 8px 18px; }
+  body.comfortable .account-pill { padding: 8px 10px; margin-bottom: 14px; }
+  body.comfortable .nav-item { padding: 9px 11px; font-size: 13.5px; }
+  body.comfortable .nav-label { padding: 10px 10px 6px; }
+  body.comfortable .topbar { padding: 14px 18px; gap: 12px; }
+  body.comfortable .searchbox { height: 38px; padding: 8px 13px; }
+  body.comfortable .btn { height: 38px; font-size: 13px; padding: 0 15px; }
+  body.comfortable .icon-btn { width: 38px; height: 38px; }
+  body.comfortable .workspace { grid-template-columns: 380px 1fr; }
+  body.comfortable .list-toolbar { padding: 10px 14px; }
+  body.comfortable .mail-item { padding: 11px 12px; gap: 11px; --avatar-list: 38px; }
+  body.comfortable .mail-item .subject { font-size: 13.5px; }
+  body.comfortable .mail-item .snippet { font-size: 12.5px; -webkit-line-clamp: 2; }
+  body.comfortable .detail-header { padding: 22px 26px 16px; }
+  body.comfortable .detail-title { font-size: 20px; }
+  body.comfortable .detail-body { padding: 18px 26px; font-size: 14.5px; }
+  body.comfortable .detail-attach { padding: 0 26px 18px; }
+  body.comfortable .attach-grid { gap: 10px; }
+  body.comfortable .ai-compose { padding: 12px 26px; }
+  body.comfortable .ai-card { width: min(440px, 92vw); margin-right: 14px; height: calc(100% - 28px); }
+  body.comfortable .ai-panel { inset: 14px; }
+  body.comfortable .login-card { padding: 40px 34px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <!-- ================= 侧边栏 ================= -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">C</div>
+        <div>
+          <div class="brand-name">HHmail</div>
+          <div class="brand-sub">Faculty · Link · Exchange</div>
+        </div>
+      </div>
+
+      <div class="account-pill">
+        <span class="dot"></span>
+        <span class="email" id="emailPill">xxx@link.example.edu</span>
+      </div>
+
+      <nav class="nav-group">
+        <div class="nav-label">邮箱</div>
+        <div class="nav-item active" data-nav="inbox"><span class="ico">📥</span> 收件箱 <span class="badge">8</span></div>
+        <div class="nav-item" data-nav="starred"><span class="ico">⭐</span> 已加星标</div>
+        <div class="nav-item" data-nav="sent"><span class="ico">↗</span> 已发送</div>
+        <div class="nav-item" data-nav="drafts"><span class="ico">✎</span> 草稿</div>
+        <div class="nav-item" data-nav="attach"><span class="ico">📎</span> 附件</div>
+        <div class="nav-label">AI</div>
+        <div class="nav-item" data-nav="ai"><span class="ico">✨</span> AI 助手</div>
+      </nav>
+
+      <!-- ================= 预留新功能导航槽位（数据驱动，见 JS futureNav） ================= -->
+      <div class="nav-label" style="margin-top:6px">即将上线</div>
+      <nav class="nav-group" id="futureNav"></nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">
+        <button class="nav-item" id="settingsBtn" style="width:100%">
+          <span class="ico">⚙︎</span> 设置 <span class="soon">settings</span>
+        </button>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;">
+          <span style="font-size:11px">主题 <b id="themeName">浅色</b></span>
+          <button class="icon-btn" id="themeToggle" title="切换主题" style="width:26px;height:26px;border-radius:var(--radius-sm)">🌓</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;">
+          <span style="font-size:11px">密度 <b id="densityName">紧凑</b></span>
+          <button class="icon-btn" id="densityToggle" title="切换密度" style="width:26px;height:26px;border-radius:var(--radius-sm)">☰</button>
+        </div>
+        <div style="margin-top:10px;color:var(--text-3)">Demo · 仅前端预览</div>
+      </div>
+    </aside>
+
+    <!-- ================= 主区 ================= -->
+    <main class="main">
+      <header class="topbar">
+        <div class="title">收件箱 <span class="sub" id="countSub">8 封未读</span></div>
+        <div class="searchbox">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4"/></svg>
+          <input id="searchInput" placeholder="搜索邮件…" />
+        </div>
+        <!-- FUTURE-SLOT: 写邮件 / 会话 / 日历等主操作按钮，可在此追加 -->
+        <button class="btn ghost" id="composeBtn" title="写邮件（后续实现）">✎ 写邮件</button>
+        <button class="btn primary" id="openAiPanel">✨ AI 助手</button>
+        <button class="icon-btn" title="刷新" id="refreshBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+        </button>
+      </header>
+
+      <div class="workspace">
+        <!-- ================= 邮件列表 ================= -->
+        <section class="list-pane">
+          <div class="list-toolbar">
+            <div class="seg">
+              <button class="on" id="segAll">全部</button>
+              <button id="segUnread">未读</button>
+            </div>
+            <span class="muted" id="listMuted">今天</span>
+          </div>
+          <div class="mail-list" id="mailList"></div>
+        </section>
+
+        <!-- ================= 邮件详情 =================
+             FUTURE-SLOT: 可在 detail-headers/actions 中追加会话、任务、日历等区块 -->
+        <section class="detail-pane" id="detailPane">
+          <div class="detail-empty" id="detailEmpty">
+            <div class="inner"><div class="big">✉️</div><div>选择一封邮件查看内容</div></div>
+          </div>
+          <div id="detailContent" style="display:none"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= AI 助手抽屉 ================= -->
+  <div class="ai-panel" id="aiPanel">
+    <div class="ai-card">
+      <div class="ai-card-head">
+        <div class="ico">✨</div>
+        <div><div class="t">AI 助手</div><div class="s">DeepSeek · 已连接</div></div>
+        <button class="icon-btn x" id="closeAiPanel">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="ai-card-body" id="aiBody">
+        <div class="ai-msg ai"><div class="bubble">你好 👋 我可以帮你总结邮件、搜索整个收件箱、拟写回复。试试点击下面的建议。</div></div>
+      </div>
+      <div class="ai-compose">
+        <div class="ai-input-wrap">
+          <textarea id="aiInput" rows="1" placeholder="问点关于你的收件箱的内容…"></textarea>
+          <button class="ai-send" id="aiSend">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <div class="ai-suggestions">
+          <button onclick="aiAsk('帮我总结这封邮件')">总结这封邮件</button>
+          <button onclick="aiAsk('上周导师发了什么邮件？')">上周导师发了什么</button>
+          <button onclick="aiAsk('帮我拟一封跟进邮件')">拟一封跟进邮件</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 登录页 ================= -->
+  <div class="login" id="loginOverlay">
+    <div class="login-card">
+      <div class="login-appicon">C</div>
+      <h1>HHmail</h1>
+      <p class="desc">用微软账号登录你的学校邮箱（Microsoft 365 / Outlook），本地只读收信 + AI 摘要。</p>
+      <div class="device-code-wrap">
+        <div class="lbl">在浏览器打开微软登录页并输入此码</div>
+        <div class="device-code">7 2 8 4 6</div>
+      </div>
+      <div class="login-actions">
+        <button class="btn-primary" id="loginBtn">✓ 已完成登录，进入 Demo</button>
+        <button class="btn-ghost" id="regenCode">重新生成设备码</button>
+      </div>
+      <div class="foot">演示用 · 前端界面预览<br/>正式版将使用设备码 + XOAUTH2 真实登录学校邮箱</div>
+    </div>
+  </div>
+
+  <!-- ================= 设置 ================= -->
+  <div class="settings" id="settingsOverlay">
+    <div class="settings-card">
+      <div class="settings-head">
+        <div class="icon-btn" style="background:rgba(120,120,128,.1)">⚙︎</div>
+        <div class="t">设置</div>
+        <button class="icon-btn" id="closeSettings" style="margin-left:auto" title="关闭">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section">
+          <div class="lbl">外观</div>
+          <div class="settings-row"><span class="name">主题</span><div class="segfull"><button id="themeLight" class="on">浅色</button><button id="themeDark">深色</button></div></div>
+          <div class="settings-row"><span class="name">密度</span><div class="segfull"><button id="densityCompact" class="on">紧凑</button><button id="densityComfortable">舒适</button></div></div>
+        </div>
+        <div class="settings-section">
+          <div class="lbl">AI 模型</div>
+          <div class="settings-row"><span class="name">供应商</span><input class="settings-input" id="setProvider" value="DeepSeek" readonly/></div>
+          <div class="settings-row"><span class="name">模型</span><input class="settings-input" id="setModel" value="deepseek-chat"/></div>
+          <div class="settings-row"><span class="name">API Key</span><input class="settings-input" id="setApiKey" type="password" placeholder="sk-…（演示）"/></div>
+        </div>
+        <div class="settings-section">
+          <div class="lbl">同步</div>
+          <div class="settings-row"><span class="name">最近同步邮件数</span><input class="settings-input" id="setSyncN" type="number" value="50" style="max-width:120px"/></div>
+          <div class="settings-row"><span class="name">账户</span><span class="hint" id="setAccount">xxx@link.example.edu</span></div>
+        </div>
+      </div>
+      <div class="settings-foot">
+        <button class="btn-ghost" id="settingsLogout">退出登录</button>
+        <div class="btns">
+          <button class="btn-ghost" id="settingsCancel">取消</button>
+          <button class="btn-primary" id="settingsSave" style="padding:10px 18px;font-size:13px">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- 深色主题样式（与设计令牌对应，便于后续扩展） -->
+  <style id="darkThemeStyle">
+    body.dark { color:#f5f5f7; background: radial-gradient(900px 500px at 10% -10%, #1e2c46 0%, transparent 55%), radial-gradient(700px 400px at 110% 20%, #16322b 0%, transparent 55%), linear-gradient(135deg, #0f1115, #16181d 60%, #14161c); }
+    body.dark .app, body.dark .main, body.dark .sidebar { background: rgba(30,32,38,.8); border-color: rgba(255,255,255,.08); }
+    body.dark .searchbox, body.dark .icon-btn, body.dark .btn.ghost { background: rgba(255,255,255,.07); }
+    body.dark .list-toolbar .seg, body.dark .list-toolbar .seg button.on { background: rgba(255,255,255,.08); }
+    body.dark .list-toolbar .seg button { color: rgba(255,255,255,.6); }
+    body.dark .list-toolbar .seg button.on { background: rgba(255,255,255,.16); color:#fff; }
+    body.dark .mail-item:hover, body.dark .nav-item:hover { background: rgba(255,255,255,.05); }
+    body.dark .mail-item.selected { background: rgba(10,132,255,.22); }
+    body.dark .detail-body, body.dark .detail-title, body.dark .who, body.dark .email { color: #f2f2f4; }
+    body.dark .ai-msg.ai .bubble { background: rgba(255,255,255,.08); color:#eee; }
+    body.dark .ai-input-wrap, body.dark .ai-card { background: rgba(28,30,36,.92); }
+    body.dark .ai-input-wrap textarea { color:#fff; }
+    body.dark .chip-btn { background: rgba(255,255,255,.08); color:#eee; }
+    body.dark .login-card { background: rgba(30,32,38,.94); color:#fff; border-color: rgba(255,255,255,.1); }
+    body.dark .login .desc { color: rgba(255,255,255,.7); }
+    body.dark .device-code { background: rgba(255,255,255,.06); color:#fff; }
+    body.dark .sidebar-footer, body.dark .muted, body.dark .snippet, body.dark .time, body.dark .size, body.dark .nav-label { color: rgba(255,255,255,.45); }
+    body.dark .btn-ghost { background: rgba(255,255,255,.08); color:#fff; }
+    body.dark .searchbox input, body.dark .searchbox svg { color:#fff; }
+  </style>
+
+<script>
+  // =====================================================================
+  // 扩展性设计说明：
+  // 1) 所有可展示/可跳转的"功能"集中在一个 registry，后续加功能只需 push 一个对象。
+  // 2) 侧边栏的"即将上线"由 futureNav 数据驱动渲染，避免硬编码。
+  // 3) AI 面板不限定场景，任何问题都可走 aiAsk()，后续可扩展为结构化指令。
+  // 4) 邮件对象是数据驱动的（字段可扩展 labels/tasks/tone 等），详情页按字段渲染。
+  // =====================================================================
+
+  // ---------- Mock data ----------
+  const avatars = [
+    ["#0a84ff","林","lin"], ["#30d158","王","wang"], ["#ff9f0a","陈","chen"],
+    ["#ff375f","李","li"], ["#5e5ce6","张","zhang"], ["#64d2ff","赵","zhao"],
+    ["#ff6482","周","zhou"], ["#bf5af2","吴","wu"]
+  ];
+  const mails = [
+    { uid:8, from:"Prof. 林教授", addr:"lin@example.edu", time:"9:12", subject:"关于毕业论文进度的沟通", snippet:"同学你好，有关你论文的第 3 章需要进一步补充实验数据，请在本周五前回复我。", body:"同学你好，\n\n有关你论文的第 3 章需要进一步补充实验数据，请在周五前回复我。下周组会我会重点看一下你那部分的进度。\n\n需要的话可以约 Office Hour。\n\n祝好，\n林教授", tone:"academic", unread:true, tag:["ai"], avatar:0, attach:[{n:"论文_第3章_修改意见.pdf",s:"1.2 MB",c:"#0a84ff"}] },
+    { uid:7, from:"教务处", addr:"office@link.example.edu", time:"昨天", subject:"【重要】关于选课与学费缴费的通知", snippet:"请各位同学于本月底前完成下一学期的选课与学费缴纳，逾期会产生额外费用。", body:"各位同学：\n\n请于本月底前完成下一学期选课与学费缴纳。\n\n逾期将会产生额外费用，且有影响注册的风险。", tone:"notice", unread:true, tag:[], avatar:3, attach:[] },
+    { uid:6, from:"CSE 系会", addr:"cse@link.example.edu", time:"昨天", subject:"CSE 系周会纪要 & 下周活动安排", snippet:"本周系会讨论了实验室开放时间调整，下周将举办职业分享会。", body:"本周系会纪要：\n\n- 实验室开放时间调整\n- 下周职业分享会\n- 新设备申购流程", tone:"event", unread:true, tag:["attach"], avatar:1, attach:[{n:"系会纪要.pdf",s:"680 KB",c:"#30d158"},{n:"活动海报.png",s:"2.4 MB",c:"#ff9f0a"}] },
+    { uid:5, from:"图书馆", addr:"lib@example.edu", time:"3天前", subject:"您借阅的资源即将到期，请及时归还", snippet:"您借阅的《机器学习》等 3 本书将在 5 天后到期，可在线续借。", body:"您好：\n\n您借阅的《机器学习》等 3 本书将在 5 天后到期。\n\n可在图书馆官网续借或到馆归还。", tone:"notice", unread:false, tag:[], avatar:4, attach:[] },
+    { uid:4, from:"王同学", addr:"wang@link.example.edu", time:"3天前", subject:"组队需要：CSCI 540 期末 project", snippet:"我这边还缺一个会前后端的队友，你有兴趣一起吗？", body:"嗨！\n\nCSCI 540 期末 project 我这边还缺一个会前后端的队友。\n\n你有兴趣一起吗？", tone:"social", unread:false, tag:[], avatar:1, attach:[] },
+    { uid:3, from:"IT 服务台", addr:"helpdesk@example.edu", time:"上周", subject:"校园网 VPN 使用指南更新", snippet:"新版 VPN 客户端已支持 Windows 11，请更新后使用。", body:"新版 VPN 客户端已支持 Windows 11。\n\n请更新后使用，若遇到问题请联系服务台。", tone:"notice", unread:false, tag:[], avatar:5, attach:[] },
+    { uid:2, from:"张同学", addr:"zhang@link.example.edu", time:"上周", subject:"关于 LHC 讲座的笔记分享", snippet:"刚整理完昨晚讲座的笔记，分享给你。", body:"刚整理完昨晚讲座的笔记，分享给你。", tone:"social", unread:false, tag:[], avatar:6, attach:[{n:"LHC讲座笔记.pdf",s:"3.1 MB",c:"#5e5ce6"}] },
+    { uid:1, from:"赵老师", addr:"zhao@example.edu", time:"上周", subject:"CSCI 540 作业 4 评分已出", snippet:"作业 4 评分已上传到系统，有问题可来办公室。", body:"作业 4 评分已出，已上传到系统。\n\n有问题可来办公室。", tone:"academic", unread:false, tag:[], avatar:7, attach:[] },
+  ];
+
+  // ---------- FEATURE REGISTRY（扩展接口：后续新导航/功能加在这里） ----------
+  // enabled=false 表示"即将上线"，只出现在侧边栏"即将上线"分组；true 则会真正激活。
+  const futureFeatures = [
+    { id:"compose",      label:"写邮件",    icon:"✎", enabled:false, hint:"P1" },
+    { id:"calendar",     label:"日历",      icon:"📅", enabled:false, hint:"待接入" },
+    { id:"meeting",      label:"会议安排",  icon:"🗓", enabled:false, hint:"待接入" },
+    { id:"rules",        label:"邮件规则",  icon:"⚙", enabled:false, hint:"待接入" },
+  ];
+
+  let selectedMail = null;
+  let filterUnread = false;
+  let searchTerm = "";
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const colorFor = n => avatars[n][0];
+  const initial = n => avatars[n][1];
+
+  function toast(msg){
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(()=> t.classList.remove("show"), 1800);
+  }
+
+  // ---------- Render future nav (data-driven) ----------
+  function renderFutureNav(){
+    const nav = $("futureNav");
+    nav.innerHTML = futureFeatures.map(f=>`
+      <div class="nav-item ${f.enabled?'':'future'}" data-nav="${f.id}" title="${f.enabled?'':'即将上线'}">
+        <span class="ico">${f.icon}</span> ${f.label}
+        <span class="soon">${f.enabled ? '' : f.hint}</span>
+      </div>`).join("");
+    nav.querySelectorAll(".nav-item").forEach(el=>{
+      el.onclick = ()=>{
+        const f = futureFeatures.find(x=>x.id===el.dataset.nav);
+        if (f && !f.enabled){ toast(`「${f.label}」功能开发中（${f.hint}），仅预留设计空间`); return; }
+        toast(`「${f.label}」即将上线`);
+      };
+    });
+  }
+
+  // ---------- Render list ----------
+  function filtered(){
+    return mails.filter(m => {
+      if (filterUnread && !m.unread) return false;
+      if (searchTerm){
+        const hay = (m.subject + m.snippet + m.from + m.addr).toLowerCase();
+        if (!hay.includes(searchTerm.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderList(){
+    const list = $("mailList");
+    const items = filtered();
+    list.innerHTML = items.length ? "" : "<div style='text-align:center;color:var(--text-3);padding:30px 0;font-size:12px'>暂无邮件</div>";
+    items.forEach(m => {
+      const el = document.createElement("div");
+      el.className = "mail-item" + (m.unread ? " unread" : "") + (selectedMail && selectedMail.uid === m.uid ? " selected" : "");
+      el.dataset.uid = m.uid;
+      el.innerHTML = `
+        ${m.unread ? '<span class="dot"></span>' : ""}
+        <div class="avatar" style="background:${colorFor(m.avatar)}">${initial(m.avatar)}</div>
+        <div class="mail-item-body">
+          <div class="mail-item-top"><span class="from">${esc(m.from)}</span><span class="time">${esc(m.time)}</span></div>
+          <div class="subject">${esc(m.subject)}</div>
+          <div class="snippet">${esc(m.snippet)}</div>
+          <div class="meta-row">
+            ${m.tag.includes("ai")?'<span class="tag ai">✨ AI</span>':""}
+            ${m.attach.length?'<span class="tag attach">📎 附件</span>':""}
+          </div>
+        </div>`;
+      el.onclick = () => selectMail(m.uid);
+      list.appendChild(el);
+    });
+    $("countSub").textContent = mails.filter(m=>m.unread).length + " 封未读";
+    $("listMuted").textContent = filterUnread ? "仅未读" : "全部";
+    $("segAll").className = filterUnread ? "" : "on";
+    $("segUnread").className = filterUnread ? "on" : "";
+  }
+
+  // ---------- Detail ----------
+  function selectMail(uid){
+    const m = mails.find(x=>x.uid===uid);
+    if (!m) return;
+    selectedMail = m;
+    $("detailEmpty").style.display = "none";
+    const c = $("detailContent");
+    c.style.display = "block";
+    c.innerHTML = `
+      <div class="detail-header">
+        <div class="detail-title">${esc(m.subject)}</div>
+        <div class="detail-from">
+          <div class="avatar" style="background:${colorFor(m.avatar)}">${initial(m.avatar)}</div>
+          <div><div class="who">${esc(m.from)}</div><div class="email">${esc(m.addr)}</div></div>
+          <div class="date">${esc(m.time)}<br/><span style="font-size:10px">发件箱 · 收件箱</span></div>
+        </div>
+        <div class="detail-actions">
+          <button class="chip-btn accent" onclick="summarizeThis()">✨ AI 总结</button>
+          <button class="chip-btn" onclick="aiAsk('帮我拟一封跟进邮件')">↩ 回复</button>
+          <button class="chip-btn" onclick="toast('已标记为已读（演示）')">✓ 已读</button>
+          <button class="chip-btn" onclick="toast('已加星标（演示）')">⭐ 星标</button>
+          <button class="chip-btn" onclick="toast('附件列表见下方（演示）')">📎 附件</button>
+        </div>
+      </div>
+      <div class="detail-body">${esc(m.body)}</div>
+      ${m.attach.length ? `
+        <div class="detail-attach">
+          <div class="lbl">附件</div>
+          <div class="attach-grid">
+            ${m.attach.map((a,i)=>`
+              <div class="attach-card" onclick="toast('正在下载 ${esc(a.n)}（演示）')">
+                <div class="file-ico" style="background:${a.c}">${a.n.split(".").pop()}</div>
+                <div><div class="name">${esc(a.n)}</div><div class="size">${esc(a.s)}</div></div>
+              </div>`).join("")}
+          </div>
+        </div>` : ""}
+      <div class="ai-compose">
+        <div class="ai-input-wrap">
+          <textarea rows="1" placeholder="问点关于这封邮件的内容…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();aiAsk(this.value);this.value='';}"></textarea>
+          <button class="ai-send" onclick="const t=this.previousElementSibling;aiAsk(t.value);t.value='';">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <div class="ai-suggestions">
+          <button onclick="aiAsk('总结这封邮件')">总结</button>
+          <button onclick="aiAsk('这封邮件有哪些行动项？')">行动项</button>
+          <button onclick="aiAsk('帮我拟一封礼貌的回复')">拟回复</button>
+        </div>
+      </div>`;
+    renderList();
+  }
+
+  // ---------- AI ----------
+  function openAiPanel(){ $("aiPanel").classList.add("open"); }
+  function closeAiPanel(){ $("aiPanel").classList.remove("open"); }
+  function appendAi(user, ai, cites){
+    const body = $("aiBody");
+    if (user){
+      body.insertAdjacentHTML("beforeend",
+        `<div class="ai-msg user"><div class="bubble">${esc(user)}</div></div>`);
+    }
+    if (ai){
+      body.insertAdjacentHTML("beforeend",
+        `<div class="ai-msg ai"><div class="bubble">${ai}${cites && cites.length ? aiCites(cites) : ""}</div></div>`);
+    } else {
+      body.insertAdjacentHTML("beforeend",
+        `<div class="ai-msg ai"><div class="thinking">正在思考…</div></div>`);
+    }
+    body.scrollTop = body.scrollHeight;
+  }
+  function aiCites(cites){
+    return `<div class="ai-cites">${cites.map((c,i)=>`<div class="ai-cite" onclick="selectMail(${c.uid})"><span class="n">[${i+1}]</span><span class="c">${esc(c.subject)} · ${esc(c.from)}</span></div>`).join("")}</div>`;
+  }
+  function aiAsk(q){
+    if (!q || !q.trim()) return;
+    q = q.trim();
+    appendAi(q, null, null);
+    $("aiInput").value = "";
+    const thinking = $("aiBody").lastElementChild;
+    setTimeout(()=>{
+      let reply, cites;
+      if (/总结/.test(q)){
+        if (selectedMail){
+          reply = `【${selectedMail.subject}】\n\n${selectedMail.from} 在 ${selectedMail.time} 发来邮件。核心要点：\n· ${selectedMail.snippet}\n\n建议：${/实验|数据/.test(selectedMail.snippet) ? "尽快补充实验数据并在周五前回复。" : "及时查看并处理。"}`;
+          cites = [selectedMail];
+        } else {
+          reply = "请先选择一封邮件，我再帮你总结。";
+          cites = [];
+        }
+      } else if (/拟|回复|跟进/.test(q)){
+        reply = "好的，这是为你拟的跟进修辞草稿（可直接复制到编辑器）：\n\n「你好，感谢你的邮件。关于提到的内容，我这边会尽快跟进，并在本周内给你答复。如有需要，我们可以约个时间具体沟通。谢谢！」";
+        cites = selectedMail ? [selectedMail] : [];
+      } else if (/上周|导师/.test(q)){
+        reply = "我搜到 1 封相关邮件：\n\n· 上周「林教授」发来一封与毕业论文进度相关的邮件，建议本周五前回复。\n· 另有一封「赵老师」的作业评分通知。";
+        cites = mails.filter(m=>/林|赵/.test(m.from));
+      } else {
+        reply = "我帮你看了收件箱：最近有几封需要关注——林教授的论文进度邮件、教务处的选课缴费通知，以及图书馆的借阅到期提醒。你想让我详细展开哪一封？";
+        cites = [mails[0], mails[1], mails[4]];
+      }
+      if (thinking) thinking.remove();
+      appendAi(null, reply, cites);
+    }, 650);
+  }
+  function summarizeThis(){
+    if (!selectedMail){ toast("请先选择一封邮件"); return; }
+    openAiPanel();
+    appendAi("总结这封邮件", null, null);
+    const body = $("aiBody");
+    const thinking = body.lastElementChild;
+    setTimeout(()=>{
+      if (thinking) thinking.remove();
+      appendAi(null, `【${selectedMail.subject}】\n\n${selectedMail.from} 发来邮件，主要内容：\n· ${selectedMail.snippet}\n\n可执行项：${/实验|数据/.test(selectedMail.snippet) ? "补充实验数据，周五前回复" : "及时查看处理"}。`, [selectedMail]);
+    }, 600);
+  }
+
+  // ---------- Core nav ----------
+  document.querySelectorAll(".sidebar .nav-item[data-nav]").forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll(".sidebar .nav-item").forEach(x=>x.classList.remove("active"));
+      el.classList.add("active");
+      const nav = el.dataset.nav;
+      if (nav === "inbox"){ filterUnread=false; searchTerm=""; $("searchInput").value=""; renderList(); }
+      if (nav === "ai"){ openAiPanel(); }
+      if (nav === "starred"){ toast("已加星标（演示，仅前端预览）"); }
+      if (nav === "attach"){ toast("附件中心（演示）"); }
+    };
+  });
+
+  // ---------- Events ----------
+  $("searchInput").addEventListener("input", e => { searchTerm = e.target.value; renderList(); });
+  $("segAll").onclick = () => { filterUnread=false; renderList(); };
+  $("segUnread").onclick = () => { filterUnread=true; renderList(); };
+  $("refreshBtn").onclick = () => { toast("正在同步…（演示）"); setTimeout(()=>toast("同步完成 ✓"), 800); };
+  $("composeBtn").onclick = () => toast("写邮件功能开发中（P1），已预留设计空间");
+  $("openAiPanel").onclick = openAiPanel;
+  $("closeAiPanel").onclick = closeAiPanel;
+  $("aiSend").onclick = () => aiAsk($("aiInput").value);
+  $("aiInput").addEventListener("keydown", e => { if (e.key==="Enter" && !e.shiftKey){ e.preventDefault(); aiAsk($("aiInput").value); } });
+  $("aiInput").addEventListener("input", e => { e.target.style.height="auto"; e.target.style.height=e.target.scrollHeight+"px"; });
+  $("loginBtn").onclick = () => { $("loginOverlay").classList.add("hidden"); toast("已进入 Demo（模拟登录成功）"); };
+  $("regenCode").onclick = () => { repaintCode(); toast("已生成新设备码（演示）"); };
+  $("themeToggle").onclick = toggleTheme;
+  $("densityToggle").onclick = toggleDensity;
+  $("settingsBtn").onclick = openSettings;
+  $("closeSettings").onclick = closeSettings;
+  $("settingsCancel").onclick = closeSettings;
+  $("themeLight").onclick = () => applyTheme(false);
+  $("themeDark").onclick = () => applyTheme(true);
+  $("densityCompact").onclick = () => applyDensity(false);
+  $("densityComfortable").onclick = () => applyDensity(true);
+  $("settingsLogout").onclick = () => { closeSettings(); toast("已退出登录（演示）"); };
+  $("settingsSave").onclick = () => {
+    const provider = $("setProvider").value.trim() || "DeepSeek";
+    const model = $("setModel").value.trim() || "deepseek-chat";
+    const key = $("setApiKey").value.trim();
+    const syncN = $("setSyncN").value.trim() || "50";
+    closeSettings();
+    toast(`已保存：${provider} · ${model} · 同步 ${syncN} 封` +
+          (key ? " · API Key 已记录（演示）" : " · API Key 未填（演示）"));
+  };
+
+  // ---------- Theme & Density ----------
+  let darkOn = false;
+  let comfortable = false;
+  function applyTheme(dark){
+    darkOn = dark;
+    document.body.classList.toggle("dark", darkOn);
+    $("themeName").textContent = darkOn ? "深色" : "浅色";
+    const l = $("themeLight"), d = $("themeDark");
+    if (l && d){ l.className = darkOn ? "" : "on"; d.className = darkOn ? "on" : ""; }
+  }
+  function applyDensity(comf){
+    comfortable = comf;
+    document.body.classList.toggle("comfortable", comfortable);
+    $("densityName").textContent = comfortable ? "舒适" : "紧凑";
+    const c = $("densityCompact"), f = $("densityComfortable");
+    if (c && f){ c.className = comfortable ? "" : "on"; f.className = comfortable ? "on" : ""; }
+  }
+  function toggleTheme(){ applyTheme(!darkOn); }
+  function toggleDensity(){ applyDensity(!comfortable); }
+
+  // ---------- Settings ----------
+  function openSettings(){
+    // 用当前状态同步界面
+    applyTheme(darkOn);
+    applyDensity(comfortable);
+    $("settingsOverlay").classList.add("open");
+  }
+  function closeSettings(){ $("settingsOverlay").classList.remove("open"); }
+
+  function repaintCode(){
+    const code = Math.floor(10000 + Math.random()*89999);
+    $("loginOverlay").querySelector(".device-code").textContent = String(code).split("").join(" ");
+  }
+
+  // ---------- Init ----------
+  function init(){
+    renderFutureNav();
+    renderList();
+    selectMail(mails[0].uid);
+    repaintCode();
+  }
+  init();
+</script>
+</body>
+</html>

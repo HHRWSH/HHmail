@@ -1,0 +1,144 @@
+{
+  "name": "hhmail",
+  "version": "1.1.0",
+  "private": true,
+  "description": "HHmail — 本地优先的学校邮箱 AI 助手：只读 IMAP + AI 摘要/问答 + 自动标签与彩色类别",
+  "author": "HHmail",
+  "main": "./out/main/index.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "npm run rebuild:electron && electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run rebuild:node && vitest run",
+    "test:e2e": "cd tests && npm test",
+    "test:all": "npm run typecheck && npm run test && npm run test:e2e",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "pack": "npm run clean:dist && npm run prepare:electron-dist && npm run build && npm run rebuild:electron && electron-builder --win && node scripts/verify-pack.mjs",
+    "clean:dist": "node scripts/clean-dist.mjs",
+    "build:eval": "esbuild scripts/eval-retrieval.ts --bundle --platform=node --format=cjs --external:better-sqlite3 --external:electron --outfile=out/eval-retrieval.cjs && esbuild scripts/dbg-query.ts --bundle --platform=node --format=cjs --external:better-sqlite3 --external:electron --outfile=out/dbg-query.cjs",
+    "eval:retrieval": "npm run rebuild:electron && npm run build:eval && node scripts/run-eval.mjs",
+    "prepare:electron-dist": "node scripts/prepare-electron-dist.mjs",
+    "pack:mac": "npm run clean:dist && npm run prepare:electron-dist && npm run build && npm run rebuild:electron && electron-builder --mac && node scripts/verify-pack.mjs",
+    "pack:mac:ci": "npm run clean:dist && npm run prepare:electron-dist && npm run build && npm run rebuild:electron && electron-builder --mac --publish never",
+    "verify:ci": "node scripts/verify-ci.mjs",
+    "verify:ci:full": "node scripts/verify-ci.mjs --with-e2e"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "better-sqlite3": "^12.4.1",
+    "dompurify": "^3.2.4",
+    "imapflow": "^1.0.174",
+    "mailparser": "^3.7.2",
+    "openai": "^4.88.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.1",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  },
+  "build": {
+    "appId": "app.hhmail.desktop",
+    "productName": "HHmail",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "electronDist": ".electron-cache",
+    "mac": {
+      "icon": "resources/icon.png",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "darkModeSupport": true,
+      "gatekeeperAssess": false,
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "forceCodeSigning": false
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "afterPack": "scripts/after-pack.mjs"
+  },
+  "allowScripts": {
+    "electron": true,
+    "better-sqlite3": true,
+    "esbuild": true
+  },
+  "keywords": [
+    "email",
+    "imap",
+    "oauth2",
+    "microsoft-365",
+    "electron",
+    "react",
+    "typescript",
+    "sqlite",
+    "fts5",
+    "ai",
+    "llm",
+    "deepseek",
+    "openai-compatible",
+    "email-assistant"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HHRWSH/HHmail.git"
+  },
+  "homepage": "https://github.com/HHRWSH/HHmail",
+  "bugs": {
+    "url": "https://github.com/HHRWSH/HHmail/issues"
+  }
+}

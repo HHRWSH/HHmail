@@ -1,0 +1,217 @@
+# 跨平台构建 + 发布
+#
+# 现状：Windows 打包已可用（npm run pack）；macOS 打包尚需补充配置，
+# 详见 docs/发布与分发指南.md §3（package.json 的 mac 段 / pack:mac 脚本 /
+# prepare-electron-dist.mjs 平台化 / verify-pack.mjs 支持 .app / 1024px 图标）。
+# 补完后本工作流即可直接产出 mac 产物。
+#
+# 无 Apple Developer 账户也能跑：macOS 产物为「ad-hoc 签名、未公证」版本，
+# 用户首次打开需手动放行（见指南 §4）。
+
+name: build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- 校验：类型检查 + 单测 + E2E ----------
+  # E2E 用系统 Edge（tests/ 里的 playwright-core），故用 windows runner
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖（根 + tests/）
+        # tests/ 有独立的 package.json（playwright / playwright-core），E2E 需要它；
+        # 浏览器用系统自带 Edge + 本地 Electron，所以跳过 Playwright 浏览器下载（省 100MB+ 与时间）
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: |
+          npm ci
+          npm --prefix tests ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 单元测试（Vitest，先重建 better-sqlite3 到 Node ABI）
+        run: npm test
+
+      - name: E2E（tests/：系统 Edge + Electron，不联网、不碰真实账号）
+        # tests 的 test 脚本内部会先 npm run build + rebuild:electron（切到 Electron ABI）
+        run: npm run test:e2e
+
+  # ---------- 打包：Windows + macOS 矩阵 ----------
+  package:
+    needs: verify
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+            eb: --win --x64
+          - os: macos-14             # Apple Silicon（M 系列）→ darwin-arm64
+            name: macos-arm64
+            eb: --mac --arm64
+            allow_failure: false
+          # Intel（darwin-x64）：GitHub 已退役 macos-13（Intel runner，作业会永远 queued），
+          # 所以改为在 Apple 芯片 runner 上**交叉构建**：准备 x64 的 Electron zip + 为 x64 重建原生模块。
+          - os: macos-14
+            name: macos-x64
+            eb: --mac --x64
+            prepare_arch: x64
+            rebuild_arch: x64
+            allow_failure: true
+          # 说明：Intel（darwin-x64）包**不再**用 macos-13 那台 runner ——
+          # GitHub 已退役该机型，任务会永远卡在 queued（实测卡了十几分钟没被调度）。
+          # 需要 Intel 包时：在有 Mac 的机器上 `npm run pack:mac -- --x64`，
+          # 或把下面这段加回来（会排队，成功与否取决于 GitHub 是否还提供 Intel runner）：
+          # - os: macos-13
+          #   name: macos-x64
+          #   eb: --mac --x64
+          #   allow_failure: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure == true }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 下面 5 步与 npm run pack 等价，拆开是为了能按平台传不同参数
+      - name: 清理历史产物
+        run: npm run clean:dist
+
+      - name: 准备 Electron 发行 zip（.electron-cache/）
+        # 失败时给出可读的原因（GitHub 的注解区只显示 "exit code 1"，这里补一条 ::error::）
+        shell: bash
+        run: |
+          npm run prepare:electron-dist -- ${{ matrix.prepare_arch && format('--arch={0}', matrix.prepare_arch) || '' }} || (
+            echo "::error title=Electron zip 准备失败::npm run prepare:electron-dist 失败；请看这一步的日志（npmmirror 与 GitHub 两条下载路径都失败了？）"
+            exit 1
+          )
+          ls -lh .electron-cache/ || true
+
+      - name: 编译（electron-vite build）
+        run: npm run build
+
+      - name: 重建原生模块（better-sqlite3 → Electron ABI）
+        shell: bash
+        run: |
+          npx electron-rebuild -f -w better-sqlite3 ${{ matrix.rebuild_arch && format('--arch {0}', matrix.rebuild_arch) || '' }} || (
+            echo "::error title=原生模块重建失败::electron-rebuild 失败（macOS 需要 Xcode 命令行工具 / Windows 需要 VS 生成工具）"
+            exit 1
+          )
+
+      - name: 打包（electron-builder）
+        shell: bash
+        run: |
+          npx electron-builder ${{ matrix.eb }} --publish never 2>&1 | tee electron-builder.log || (
+            echo "::error title=electron-builder 失败::见下方 'electron-builder 日志摘要' 或下载 build-log-${{ matrix.name }} 产物"
+            tail -n 40 electron-builder.log
+            exit 1
+          )
+        env:
+          # 没有 Apple 证书：关闭签名身份自动发现。
+          # arm64/universal 构建下 electron-builder 会自动做 ad-hoc 签名（应用可运行）。
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: 产物启动冒烟（防 ABI 不匹配导致双击无反应）
+        # CI runner 没有 GPU：脚本内已强制软件渲染（HHMAIL_DISABLE_GPU=1 + --in-process-gpu）。
+        # 冒烟只用于「提前发现问题」，**不阻塞产物上传**（continue-on-error），避免 runner 环境差异让人拿不到安装包。
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            xattr -dr com.apple.quarantine "dist/mac"*/"HHmail.app" || true
+          fi
+          node scripts/verify-pack.mjs
+
+      - name: 列出产物
+        shell: bash
+        run: ls -lh dist/ | head -40 || true
+
+      - name: 上传构建日志（无论成功失败，排查用）
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-log-${{ matrix.name }}
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            electron-builder.log
+            .electron-cache/*.log
+            dist/builder-debug.yml
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          if-no-files-found: warn
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/*.yml
+
+  # ---------- 发布：打 v* tag 时创建 GitHub Release（草稿） ----------
+  release:
+    # 只在「新建 tag」时更新 Release；强制重推同一个 tag（force push）不碰已有的 Release，
+    # 否则会把已发布的 Release 又改回草稿（踩过）。
+    if: startsWith(github.ref, 'refs/tags/v') && github.event.forced != true
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      # 必须 checkout：Release 正文（body_path）与要附上的说明文档都在仓库里
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          # 只取各平台的安装包产物；build-log-* 是排查用的日志，不进 Release
+          pattern: '{windows-*,macos-*}'
+          merge-multiple: true
+
+      - name: 生成校验清单（SHA256SUMS.txt）
+        shell: bash
+        run: |
+          cd artifacts
+          rm -f SHA256SUMS.txt
+          for f in *.exe *.dmg *.zip; do
+            if [ -f "$f" ]; then sha256sum "$f" >> SHA256SUMS.txt; fi
+          done
+          echo '--- SHA256SUMS.txt ---'
+          cat SHA256SUMS.txt || true
+
+      - name: 附上使用说明
+        shell: bash
+        run: |
+          # 用 ASCII 文件名（中文名上传到 Release 时会被截断成 "HHmail-1.0.0-.txt"）
+          cp docs/使用说明-v1.1.0.txt artifacts/HHmail-1.1.0-usage-zh.txt || true
+          cp docs/mac-下载与安装.md artifacts/HHmail-1.1.0-macos-guide-zh.md || true
+          ls -lh artifacts | head -20
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: 'HHmail 1.1.0'
+          body_path: docs/RELEASE-NOTES-v1.1.0.md
+          files: artifacts/**/*
