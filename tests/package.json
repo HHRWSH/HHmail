@@ -1,0 +1,18 @@
+{
+  "name": "hhmail-self-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "开发 AI 自测：demo 冒烟 + renderer E2E + Electron 冒烟（系统 Edge / Electron，免下载 Chromium）。",
+  "scripts": {
+    "test": "npm run build:app && node e2e/smoke.mjs && node e2e/renderer.mjs && node e2e/electron.mjs",
+    "test:demo": "node e2e/smoke.mjs",
+    "test:renderer": "node e2e/renderer.mjs",
+    "test:electron": "node e2e/electron.mjs",
+    "build:app": "cd .. && npm run build && npm run rebuild:electron"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0",
+    "playwright": "^1.49.0"
+  }
+}
