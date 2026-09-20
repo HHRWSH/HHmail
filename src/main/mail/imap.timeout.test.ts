@@ -17,6 +17,8 @@ import { MemoryLogger } from '../logger'
 
 interface FakeClient {
   usable?: boolean
+  /** 当前选中的邮箱（searchAllUids 会读它决定是否需要补 SELECT） */
+  mailbox?: { path?: string; exists?: number } | false
   connectFails?: number
   connectHangs?: boolean
   noopResult?: 'ok' | 'fail' | 'false'
@@ -92,7 +94,7 @@ function makeFakeClient(overrides: Partial<FakeClient> = {}): FakeClient {
   return client
 }
 
-const fastTimeouts = { connectMs: 60, greetingMs: 40, socketMs: 200, attempts: 3, backoffMs: [0, 5, 10], keepAliveMs: 10_000, keepAliveMaxFailures: 2 }
+const fastTimeouts = { pingMs: 40, commandMs: 60, searchMs: 80, connectMs: 60, greetingMs: 40, socketMs: 200, attempts: 2, backoffMs: [0, 5], keepAliveMs: 10_000, keepAliveMaxFailures: 2 }
 
 describe('IMAP 建连：硬超时 + 有限重试（真机「同步卡两分钟」回归）', () => {
   it('建连挂住 → 在 connectMs 量级失败，而不是无限等待', async () => {
@@ -141,6 +143,140 @@ describe('IMAP 建连：硬超时 + 有限重试（真机「同步卡两分钟�
       fastTimeouts
     )
     await expect(provider.connect()).rejects.toMatchObject({ code: 'IMAP_CONNECT_FAILED' })
+  })
+})
+
+describe('IMAP 同步前体检（真机第三次定位：坏连接让命令干等 20 秒）', () => {
+  it('连接是热的（NOOP 正常）→ 复用它，不再握手', async () => {
+    const clients: FakeClient[] = []
+    const logger = new MemoryLogger()
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      logger,
+      () => {
+        const c = makeFakeClient()
+        clients.push(c)
+        return c as never
+      },
+      fastTimeouts
+    )
+    await provider.connect() // 首次：建立连接
+    await provider.connect() // 第二次：应当只做体检、复用同一条
+    expect(clients).toHaveLength(1)
+    expect(clients[0].noopCalls).toBe(1)
+  })
+
+  it('连接已坏（NOOP 超时）→ 立刻换新连接，而不是让后续命令干等', async () => {
+    const clients: FakeClient[] = []
+    const logger = new MemoryLogger()
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      logger,
+      () => {
+        const c = makeFakeClient()
+        clients.push(c)
+        return c as never
+      },
+      fastTimeouts
+    )
+    await provider.connect()
+    clients[0].noop = () => new Promise<never>(() => undefined) // 模拟「以为活着其实死了」
+    const started = Date.now()
+    await provider.connect()
+    expect(Date.now() - started).toBeLessThan(1000) // 受 pingMs 限制，不会拖到 20 秒
+    expect(clients).toHaveLength(2)
+    expect(clients[0].closed).toBe(true)
+    expect(logger.entries.some((e) => e.event === 'imap.ping.failed')).toBe(true)
+  })
+
+  it('usable=false → 直接换新连接', async () => {
+    const clients: FakeClient[] = []
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      new MemoryLogger(),
+      () => {
+        const c = makeFakeClient()
+        clients.push(c)
+        return c as never
+      },
+      fastTimeouts
+    )
+    await provider.connect()
+    clients[0].usable = false
+    await provider.connect()
+    expect(clients).toHaveLength(2)
+  })
+})
+
+describe('并发建连串行化（真机：同步与保温各开一条连接 → 被限流 → 命令挂 22 秒）', () => {
+  it('并发 connect() 只建立一条连接', async () => {
+    const clients: FakeClient[] = []
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      new MemoryLogger(),
+      () => {
+        const c = makeFakeClient()
+        clients.push(c)
+        return c as never
+      },
+      fastTimeouts
+    )
+    await Promise.all([provider.connect(), provider.connect(), provider.connect()])
+    expect(clients).toHaveLength(1)
+  })
+
+  it('体检失败后并发重连也只建立一条新连接', async () => {
+    const clients: FakeClient[] = []
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      new MemoryLogger(),
+      () => {
+        const c = makeFakeClient()
+        clients.push(c)
+        return c as never
+      },
+      fastTimeouts
+    )
+    await provider.connect()
+    clients[0].usable = false // 连接坏了
+    await Promise.all([provider.connect(), provider.connect()])
+    expect(clients).toHaveLength(2) // 第一条 + 一条新连接（不是两条）
+  })
+})
+
+describe('IMAP 命令级超时（真机第二次定位：建连修好后仍有 47 秒周期）', () => {
+  it('SEARCH 挂住 → 在 searchMs 内抛错，不会拖满整个同步周期', async () => {
+    const logger = new MemoryLogger()
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      logger,
+      () =>
+        makeFakeClient({
+          search: () => new Promise<never>(() => undefined),
+          mailbox: { path: 'INBOX', exists: 1 }
+        }) as never,
+      fastTimeouts
+    )
+    await provider.connect()
+    const started = Date.now()
+    await expect(provider.searchAllUids('INBOX')).rejects.toThrow(/search timeout/)
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('SELECT/STATUS 挂住 → 在 commandMs 内失败（打开文件夹不会无限等）', async () => {
+    const provider = new ImapMailProvider(
+      async () => ({ user: 'me@example.edu', accessToken: 'tok' }),
+      new MemoryLogger(),
+      () =>
+        makeFakeClient({
+          mailboxOpen: () => new Promise<never>(() => undefined)
+        }) as never,
+      fastTimeouts
+    )
+    await provider.connect()
+    const started = Date.now()
+    await expect(provider.openInboxReadOnly()).rejects.toBeTruthy()
+    expect(Date.now() - started).toBeLessThan(2000)
   })
 })
 

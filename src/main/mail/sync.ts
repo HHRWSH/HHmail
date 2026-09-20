@@ -99,12 +99,26 @@ export class SyncEngine {
     const window = windowOverride ?? this.deps.syncWindow ?? 0
     const startedAt = Date.now()
 
+    // 同步结束后释放 mailbox lock（真机：锁不释放会让下一次同步取锁干等 20 秒）
+    const releaseLock = (): void => {
+      try {
+        ;(provider as unknown as { releaseLock?: () => void }).releaseLock?.()
+      } catch {
+        /* ignore */
+      }
+    }
+
     progress?.({ phase: 'connecting', done: 0, total: 0 })
     try {
       await provider.connect()
     } catch (e) {
       // 透传真实错误码（AUTH_INVALID_GRANT / AUTH_REQUIRED / IMAP_CONNECT_FAILED），
       // 让 UI 能提示「登录已失效」并引导重新登录，而不是一律伪装成网络错误
+      try {
+        ;(provider as unknown as { releaseLock?: () => void }).releaseLock?.()
+      } catch {
+        /* ignore */
+      }
       const code = e instanceof AppError ? e.code : ErrorCodes.IMAP_CONNECT_FAILED
       logger.error('sync.connect.failed', { errorCode: code })
       if (e instanceof AppError) throw e
@@ -127,6 +141,7 @@ export class SyncEngine {
     }
 
     const mode: SyncMode = modes.includes('full') ? 'full' : modes.includes('incremental') ? 'incremental' : 'uptodate'
+    releaseLock()
     const durationMs = Date.now() - startedAt
     logger.metric('sync.duration', durationMs, { mode, synced: syncedTotal, skipped: skippedTotal })
     logger.info('sync.done', { mode, synced: syncedTotal, skipped: skippedTotal, durationMs })

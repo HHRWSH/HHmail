@@ -9,6 +9,10 @@ import { ImapFlow } from 'imapflow'
 import { AppError, ErrorCodes } from '../../shared/error-codes'
 import {
   FETCH_BODY_TIMEOUT_MS,
+  IMAP_COMMAND_TIMEOUT_MS,
+  IMAP_LOCK_TIMEOUT_MS,
+  IMAP_PING_TIMEOUT_MS,
+  IMAP_SEARCH_TIMEOUT_MS,
   IMAP_CONNECT_ATTEMPTS,
   IMAP_CONNECT_BACKOFF_MS,
   IMAP_CONNECT_TIMEOUT_MS,
@@ -100,6 +104,11 @@ const NOT_FOUND_RE = /not found|no such|unknown|does not exist|no messages/i
 
 /** 连接相关的时间参数（可注入，便于单测用毫秒级验证超时/重试） */
 export interface ImapTimeouts {
+  /** 取 mailbox lock 的上限：这是本地锁，正常是毫秒级；等超过几秒说明上一条命令没收尾 */
+  lockMs: number
+  pingMs: number
+  commandMs: number
+  searchMs: number
   connectMs: number
   greetingMs: number
   socketMs: number
@@ -107,6 +116,24 @@ export interface ImapTimeouts {
   backoffMs: number[]
   keepAliveMs: number
   keepAliveMaxFailures: number
+}
+
+/**
+ * 给任意 IMAP 命令套硬超时。超时不是「等等就好」——真机上一条 SELECT 能挂 47 秒，
+ * 所以超时后必须把这条连接**丢掉重建**（调用方负责），否则后面所有命令都排在它后面。
+ */
+async function withTimeout<T>(task: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /** 小工具：等待若干毫秒（重试退避用） */
@@ -127,7 +154,13 @@ export class ImapMailProvider implements MailProvider {
   private lock: { release(): void } | null = null
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null
   private keepAliveFailures = 0
+  /** 进行中的建连：并发调用共享同一个 Promise（否则同步/保温会各开一条连接 → 服务器限流 → 命令挂住） */
+  private connecting: Promise<void> | null = null
   private timeouts: ImapTimeouts = {
+    lockMs: IMAP_LOCK_TIMEOUT_MS,
+    pingMs: IMAP_PING_TIMEOUT_MS,
+    commandMs: IMAP_COMMAND_TIMEOUT_MS,
+    searchMs: IMAP_SEARCH_TIMEOUT_MS,
     connectMs: IMAP_CONNECT_TIMEOUT_MS,
     greetingMs: IMAP_GREETING_TIMEOUT_MS,
     socketMs: IMAP_SOCKET_TIMEOUT_MS,
@@ -172,7 +205,25 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async connect(): Promise<void> {
-    if (this.client) return
+    if (this.client) {
+      // 已有连接：先做一次轻量体检（NOOP，8 秒上限）。
+      // 服务器/中间设备会悄悄断开空闲连接，而客户端以为它还活着 ——
+      // 那样下一条命令要干等 20 秒才超时（真机表现为「有时同步要二十多秒」）。
+      if (await this.pingForSync()) return
+      await this.close().catch(() => undefined)
+    }
+    // 并发调用（同步 / 连接保温 / 保活）必须共享同一次建连：
+    // 各开一条连接会被 M365 限流，随后命令集体挂住（真机 22 秒周期就是这么来的）
+    if (this.connecting) return this.connecting
+    this.connecting = this.doConnect()
+    try {
+      await this.connecting
+    } finally {
+      this.connecting = null
+    }
+  }
+
+  private async doConnect(): Promise<void> {
     const { user, accessToken } = await this.tokenGetter()
     let lastReason = ''
     for (let attempt = 1; attempt <= this.timeouts.attempts; attempt += 1) {
@@ -204,6 +255,26 @@ export class ImapMailProvider implements MailProvider {
     }
     this.logger?.error('imap.connect.failed', { errorCode: 'IMAP_CONNECT_FAILED', reason: lastReason })
     throw new AppError(ErrorCodes.IMAP_CONNECT_FAILED, '无法连接邮箱服务器，请检查网络后重试。')
+  }
+
+  /**
+   * 同步前的连接体检：一条 NOOP。成功 = 连接是热的，可以省掉一次握手；
+   * 失败/超时 = 连接已经死了，调用方会关掉它重建（代价是一次握手，而不是 20 秒干等）。
+   */
+  async pingForSync(): Promise<boolean> {
+    const client = this.client
+    if (!client) return false
+    if (client.usable === false) return false
+    if (typeof client.noop !== 'function') return true
+    try {
+      const ok = await withTimeout(client.noop(), this.timeouts.pingMs, 'ping')
+      if (ok === false) throw new Error('noop returned false')
+      this.keepAliveFailures = 0
+      return true
+    } catch (e) {
+      this.logger?.warn('imap.ping.failed', { reason: e instanceof Error ? e.message : String(e) })
+      return false
+    }
   }
 
   /**
@@ -273,7 +344,7 @@ export class ImapMailProvider implements MailProvider {
     }
     if (typeof client.noop !== 'function') return 'ok'
     try {
-      const ok = await client.noop()
+      const ok = await withTimeout(client.noop(), this.timeouts.commandMs, 'noop')
       if (ok === false) throw new Error('noop returned false')
       this.keepAliveFailures = 0
       return 'ok'
@@ -303,9 +374,12 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async openFolderReadOnly(folderPath: string): Promise<MailboxInfo> {
+    const startedAt = Date.now()
     let client = await this.ensureConnected()
     try {
-      return await this.openFolder(client, folderPath)
+      const info = await this.openFolder(client, folderPath)
+      this.logger?.info('imap.open.ms', { folder: folderPath, elapsedMs: Date.now() - startedAt })
+      return info
     } catch (e) {
       // 空闲断线导致首次打开失败：断开重连后重试一次
       this.logger?.warn('imap.open.retry', { errorCode: 'IMAP_CONNECT_FAILED' })
@@ -325,7 +399,7 @@ export class ImapMailProvider implements MailProvider {
     const folders: { name: string; path: string }[] = []
     try {
       // imapflow v1 的 list() 返回 Promise<ListResponse[]>（不是异步迭代器）
-      const items = await client.list()
+      const items = await withTimeout(client.list(), this.timeouts.commandMs, 'list')
       for (const item of items) {
         // \Noselect 容器目录不可打开，跳过
         if (item.flags.has('\\Noselect')) continue
@@ -338,9 +412,17 @@ export class ImapMailProvider implements MailProvider {
   }
 
   private async openFolder(client: ImapFlowLike, folderPath: string): Promise<MailboxInfo> {
-    const lock = await client.getMailboxLock(folderPath)
+    // 真机定位：同步周期里 20 秒都耗在「取 mailbox lock」上（上一条命令没释放锁）。
+    // 锁是本地资源，正常毫秒级，所以单独用更短的超时，超过就抛错让上层重连重试。
+    const lockStartedAt = Date.now()
+    const lock = await withTimeout(client.getMailboxLock(folderPath), this.timeouts.lockMs, 'getMailboxLock')
+    const lockMs = Date.now() - lockStartedAt
     try {
-      const mailbox = await client.mailboxOpen(folderPath, { readOnly: true })
+      const mailbox = await withTimeout(
+        client.mailboxOpen(folderPath, { readOnly: true }),
+        this.timeouts.commandMs,
+        'mailboxOpen'
+      )
       this.lock = lock
       let exists = mailbox.exists
       let uidNext = mailbox.uidNext
@@ -349,7 +431,11 @@ export class ImapMailProvider implements MailProvider {
       // 会造成新邮件同步不进来。这里额外发一次 STATUS（只读）取实时值。
       try {
         if (typeof client.status === 'function') {
-          const st = await client.status(folderPath, { messages: true, uidNext: true, uidValidity: true })
+          const st = await withTimeout(
+            client.status(folderPath, { messages: true, uidNext: true, uidValidity: true }),
+            this.timeouts.commandMs,
+            'status'
+          )
           if (st) {
             if (typeof st.messages === 'number') exists = st.messages
             if (typeof st.uidNext === 'number') uidNext = st.uidNext
@@ -359,10 +445,27 @@ export class ImapMailProvider implements MailProvider {
       } catch (e) {
         this.logger?.warn('imap.status.failed', { reason: e instanceof Error ? e.message : String(e) })
       }
+      this.logger?.info('imap.open.phases', { folder: folderPath, lockMs, totalMs: Date.now() - lockStartedAt })
       return { uidValidity, exists, uidNext }
     } catch (e) {
       lock.release()
       throw e
+    }
+  }
+
+  /**
+   * 释放 mailbox lock（同步结束后调用）。
+   * 之前我们把锁一直攥在手里直到连接关闭，导致下一次同步取锁要等 ——
+   * 真机日志里表现为「20 秒没有任何日志，然后 imap.open.retry」。每次同步后主动释放更安全。
+   */
+  releaseLock(): void {
+    if (this.lock) {
+      try {
+        this.lock.release()
+      } catch {
+        /* ignore */
+      }
+      this.lock = null
     }
   }
 
@@ -385,9 +488,10 @@ export class ImapMailProvider implements MailProvider {
     const mb = client.mailbox
     const selected = mb && typeof mb === 'object' ? mb.path : undefined
     if (!selected || selected.toUpperCase() !== folder.toUpperCase()) {
-      await client.mailboxOpen(folder, { readOnly: true })
+      await withTimeout(client.mailboxOpen(folder, { readOnly: true }), this.timeouts.commandMs, 'mailboxOpen(search)')
     }
-    const res = await client.search({ all: true }, { uid: true })
+    // SEARCH 是「同步很慢」的第二个卡点（比 socketTimeout 更早触发）：给它 30 秒上限，超时即抛错并丢连接
+    const res = await withTimeout(client.search({ all: true }, { uid: true }), this.timeouts.searchMs, 'search')
     if (!Array.isArray(res)) {
       throw new Error('UID SEARCH 未返回结果（邮箱未选中或服务器拒绝）')
     }

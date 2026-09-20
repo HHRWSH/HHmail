@@ -112,8 +112,31 @@ export const IMAP_SOCKET_TIMEOUT_MS = 60_000
 export const IMAP_CONNECT_ATTEMPTS = 2
 /** 重试之间的退避（毫秒，按序号取，最后一个复用） */
 export const IMAP_CONNECT_BACKOFF_MS = [0, 1_500]
-/** NOOP 保活间隔：连接闲置超过这个时间就发一次 NOOP，避免被中间设备悄悄断开 */
-export const IMAP_KEEPALIVE_MS = 150_000
+/**
+ * 单条 IMAP 命令的硬上限（SELECT / STATUS / SEARCH / LIST / NOOP）。
+ * 真机二次定位：建连修好后仍有 47 秒的同步周期 —— 卡在 SELECT/SEARCH 这类命令上
+ * （socketTimeout 只管「连接空闲」，命令本身可以无限等）。超时后我们直接丢弃这条连接并重试。
+ */
+export const IMAP_COMMAND_TIMEOUT_MS = 20_000
+/**
+ * 取 mailbox lock 的上限。这是**本地**锁（imapflow 内部排队），正常毫秒级；
+ * 真机上出现过等 20 秒的情况（上一条命令没释放），所以单独收紧到 6 秒。
+ */
+export const IMAP_LOCK_TIMEOUT_MS = 6_000
+
+/** SEARCH 单独给宽一点（邮箱很大时服务器端确实会慢，但也不能无限等） */
+export const IMAP_SEARCH_TIMEOUT_MS = 30_000
+
+/**
+ * 每次同步前的「连接体检」：一条 NOOP，8 秒上限。
+ * 真机第三次定位：服务器/中间设备会**悄悄**断开空闲连接，而客户端以为还活着，
+ * 于是下一条命令干等 20 秒才超时（表现为「有时候同步要 20 多秒」）。
+ * 用一次 0.2~0.5 秒的 NOOP 提前发现，直接把坏连接换掉。
+ */
+export const IMAP_PING_TIMEOUT_MS = 8_000
+
+/** NOOP 保活间隔：连接闲置超过这个时间就发一次 NOOP，避免被中间设备悄悄断开（60 秒足够挡住多数中间设备的空闲回收） */
+export const IMAP_KEEPALIVE_MS = 60_000
 /** 保活判定「需要重连」的连续失败次数 */
 export const IMAP_KEEPALIVE_MAX_FAILURES = 2
 
