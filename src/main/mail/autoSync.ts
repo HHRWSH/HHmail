@@ -50,8 +50,12 @@ export interface AutoSyncScheduler {
 export const AUTO_SYNC_TICK_MS = 20_000
 /** 同步失败后多久重试（比正常间隔更短，尽快恢复） */
 export const AUTO_SYNC_RETRY_MS = 60_000
-/** 单次同步超过这个时间视为卡死 → 触发 onStall（关连接） */
-export const AUTO_SYNC_STALL_MS = 120_000
+/**
+ * 单次同步超过这个时间视为卡死 → 触发 onStall（关连接）。
+ * 收紧到 45 秒：建连本身已有 15 秒硬超时（见 config.IMAP_CONNECT_TIMEOUT_MS），
+ * 正常情况下一次同步只有几秒；超过 45 秒说明链路确实卡住了，早点断开重连比干等两分钟好。
+ */
+export const AUTO_SYNC_STALL_MS = 45_000
 
 export function createAutoSyncScheduler(deps: AutoSyncDeps): AutoSyncScheduler {
   const now = deps.now ?? ((): number => Date.now())

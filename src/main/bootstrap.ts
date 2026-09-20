@@ -211,6 +211,11 @@ export async function bootstrap(deps: BootstrapDeps): Promise<AppContext> {
     mockMode: mock,
     userDataPath,
     shutdown: async () => {
+      try {
+        ;(provider as unknown as { stopKeepAlive?: () => void }).stopKeepAlive?.()
+      } catch {
+        /* ignore */
+      }
       await provider.close().catch(() => undefined)
       store.close()
       for (const repo of closeExtra) repo.close()

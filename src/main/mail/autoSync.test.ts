@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { IMAP_CONNECT_ATTEMPTS, IMAP_CONNECT_BACKOFF_MS, IMAP_CONNECT_TIMEOUT_MS } from '../config'
 import { AUTO_SYNC_RETRY_MS, AUTO_SYNC_STALL_MS, AUTO_SYNC_TICK_MS, createAutoSyncScheduler } from './autoSync'
 import { MemoryLogger } from '../logger'
 
@@ -166,9 +167,16 @@ describe('后台自动同步调度（真机：休眠/最小化后不同步）', 
     expect(h.timers.filter((t) => t.kind === 'interval')).toHaveLength(0)
   })
 
-  it('心跳间隔常量保持合理（20 秒检查、2 分钟判卡死）', () => {
+  it('心跳间隔常量保持合理（20 秒检查、45 秒判卡死）', () => {
     expect(AUTO_SYNC_TICK_MS).toBe(20_000)
-    expect(AUTO_SYNC_STALL_MS).toBe(120_000)
+    // V1.2 真机修复：建连已有 15 秒硬超时，看门狗从 120s 收紧到 45s，
+    // 避免「网络半死时干等两分钟」被用户感知成「同步不上」
+    expect(AUTO_SYNC_STALL_MS).toBe(45_000)
+    // 看门狗必须大于「建连最坏耗时」，否则一次正常的重试序列会被误判成卡死
+    const worstCaseConnect =
+      IMAP_CONNECT_TIMEOUT_MS * IMAP_CONNECT_ATTEMPTS +
+      IMAP_CONNECT_BACKOFF_MS.reduce((a, b) => a + b, 0)
+    expect(AUTO_SYNC_STALL_MS).toBeGreaterThan(worstCaseConnect)
   })
   it('陈旧自愈：超过 2 个间隔没成功同步 → 无视节流立刻补一次（休眠/托盘久置兜底）', async () => {
     const h = makeHarness({ intervalSec: 300 })

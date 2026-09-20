@@ -7,7 +7,18 @@
  */
 import { ImapFlow } from 'imapflow'
 import { AppError, ErrorCodes } from '../../shared/error-codes'
-import { FETCH_BODY_TIMEOUT_MS, IMAP_HOST, IMAP_PORT } from '../config'
+import {
+  FETCH_BODY_TIMEOUT_MS,
+  IMAP_CONNECT_ATTEMPTS,
+  IMAP_CONNECT_BACKOFF_MS,
+  IMAP_CONNECT_TIMEOUT_MS,
+  IMAP_GREETING_TIMEOUT_MS,
+  IMAP_HOST,
+  IMAP_KEEPALIVE_MAX_FAILURES,
+  IMAP_KEEPALIVE_MS,
+  IMAP_PORT,
+  IMAP_SOCKET_TIMEOUT_MS
+} from '../config'
 import type { Logger } from '../logger'
 import {
   type AttachmentPayload,
@@ -76,11 +87,32 @@ interface ImapFlowLike {
       }
     >
   >
+  /** 保活用：NOOP（imapflow 支持；失败即视为连接不可用） */
+  noop?(): Promise<boolean | void>
+  /** 连接事件（close/error）：断线时我们要立刻知道，好在后台重连 */
+  on?(event: string, cb: (...args: unknown[]) => void): void
+  once?(event: string, cb: (...args: unknown[]) => void): void
   logout(): Promise<void>
   close(): Promise<void>
 }
 
 const NOT_FOUND_RE = /not found|no such|unknown|does not exist|no messages/i
+
+/** 连接相关的时间参数（可注入，便于单测用毫秒级验证超时/重试） */
+export interface ImapTimeouts {
+  connectMs: number
+  greetingMs: number
+  socketMs: number
+  attempts: number
+  backoffMs: number[]
+  keepAliveMs: number
+  keepAliveMaxFailures: number
+}
+
+/** 小工具：等待若干毫秒（重试退避用） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /** 单封取正文超时：兜底路径用 FETCH_BODY_TIMEOUT_MS，已确认存在的用 CONFIRMED_FETCH_TIMEOUT_MS（见 config.ts）。 */
 const FETCH_ONE_TIMEOUT_MS = FETCH_BODY_TIMEOUT_MS
@@ -93,14 +125,32 @@ export class ImapMailProvider implements MailProvider {
 
   private client: ImapFlowLike | null = null
   private lock: { release(): void } | null = null
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null
+  private keepAliveFailures = 0
+  private timeouts: ImapTimeouts = {
+    connectMs: IMAP_CONNECT_TIMEOUT_MS,
+    greetingMs: IMAP_GREETING_TIMEOUT_MS,
+    socketMs: IMAP_SOCKET_TIMEOUT_MS,
+    attempts: IMAP_CONNECT_ATTEMPTS,
+    backoffMs: IMAP_CONNECT_BACKOFF_MS,
+    keepAliveMs: IMAP_KEEPALIVE_MS,
+    keepAliveMaxFailures: IMAP_KEEPALIVE_MAX_FAILURES
+  }
   private tokenGetter: TokenGetter
   private logger?: Logger
   private flowFactory?: (opts: Record<string, unknown>) => ImapFlowLike
 
-  constructor(tokenGetter: TokenGetter, logger?: Logger, flowFactory?: (opts: Record<string, unknown>) => ImapFlowLike) {
+  constructor(
+    tokenGetter: TokenGetter,
+    logger?: Logger,
+    flowFactory?: (opts: Record<string, unknown>) => ImapFlowLike,
+    /** 可注入的超时/重试参数（单测用毫秒级，生产用 config 里的常量） */
+    timeouts?: Partial<ImapTimeouts>
+  ) {
     this.tokenGetter = tokenGetter
     this.logger = logger
     this.flowFactory = flowFactory
+    if (timeouts) this.timeouts = { ...this.timeouts, ...timeouts }
   }
 
   private createClient(accessToken: string, user: string): ImapFlowLike {
@@ -113,6 +163,10 @@ export class ImapMailProvider implements MailProvider {
       port: IMAP_PORT,
       secure: true,
       auth: { user, accessToken },
+      // 每个阶段都设硬上限：默认 connectionTimeout≈90s，网络半死时会挂满两分钟（真机踩过）
+      connectionTimeout: this.timeouts.connectMs,
+      greetingTimeout: this.timeouts.greetingMs,
+      socketTimeout: this.timeouts.socketMs,
       logger: false // 关闭内部日志，避免打印敏感信息
     }) as unknown as ImapFlowLike
   }
@@ -120,16 +174,128 @@ export class ImapMailProvider implements MailProvider {
   async connect(): Promise<void> {
     if (this.client) return
     const { user, accessToken } = await this.tokenGetter()
-    const client = this.createClient(accessToken, user)
-    try {
-      await client.connect()
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
-      this.logger?.error('imap.connect.failed', { errorCode: 'IMAP_CONNECT_FAILED', reason })
-      throw new AppError(ErrorCodes.IMAP_CONNECT_FAILED, '无法连接邮箱服务器，请检查网络后重试。')
+    let lastReason = ''
+    for (let attempt = 1; attempt <= this.timeouts.attempts; attempt += 1) {
+      const backoff = this.timeouts.backoffMs[Math.min(attempt - 1, this.timeouts.backoffMs.length - 1)] ?? 0
+      if (backoff > 0) await sleep(backoff)
+      const client = this.createClient(accessToken, user)
+      const startedAt = Date.now()
+      try {
+        await this.connectWithTimeout(client)
+        this.client = client
+        this.attachLifecycle(client)
+        this.logger?.info('imap.connected', { attempt, elapsedMs: Date.now() - startedAt })
+        return
+      } catch (e) {
+        lastReason = e instanceof Error ? e.message : String(e)
+        this.logger?.warn('imap.connect.attempt_failed', {
+          attempt,
+          of: this.timeouts.attempts,
+          elapsedMs: Date.now() - startedAt,
+          reason: lastReason
+        })
+        // 超时/失败的那条连接必须显式关掉，否则 socket 会一直挂着（真机表现为「同步卡死」）
+        try {
+          await client.close()
+        } catch {
+          /* ignore */
+        }
+      }
     }
-    this.client = client
-    this.logger?.info('imap.connected')
+    this.logger?.error('imap.connect.failed', { errorCode: 'IMAP_CONNECT_FAILED', reason: lastReason })
+    throw new AppError(ErrorCodes.IMAP_CONNECT_FAILED, '无法连接邮箱服务器，请检查网络后重试。')
+  }
+
+  /**
+   * 建连硬超时：即使库本身忽略了 connectionTimeout，这里也会在 15 秒后放弃并关掉这条连接。
+   * 这是「不再出现 120 秒同步」的关键兜底。
+   */
+  private async connectWithTimeout(client: ImapFlowLike): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      await Promise.race([
+        client.connect(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`connect timeout after ${this.timeouts.connectMs}ms`)), this.timeouts.connectMs)
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  /** 监听断线事件：立刻把 client 置空（下次同步会重新建连），并顺手停掉保活 */
+  private attachLifecycle(client: ImapFlowLike): void {
+    const drop = (event: string) => {
+      if (this.client === client) {
+        this.client = null
+        this.lock = null
+        this.logger?.warn('imap.dropped', { event })
+      }
+    }
+    try {
+      client.on?.('close', () => drop('close'))
+      client.on?.('error', () => drop('error'))
+      client.on?.('end', () => drop('end'))
+    } catch {
+      /* 假客户端（测试）可能没实现 on */
+    }
+  }
+
+  /**
+   * NOOP 保活：闲置的 IMAP 连接会被运营商/服务器悄悄掐断（日志里表现为每个周期都 imap.connected），
+   * 断掉之后用户点同步就要重新握手，一旦网络抖动就卡两分钟。
+   * 这里定期 NOOP：成功了连接就是热的；连续失败就主动关掉，让下一次同步走「新建连」而不是「用坏连接」。
+   */
+  startKeepAlive(): void {
+    if (this.keepAliveTimer) return
+    this.keepAliveTimer = setInterval(() => {
+      void this.keepAliveOnce()
+    }, this.timeouts.keepAliveMs)
+    // 保活是后台任务，不应该拖住进程退出
+    ;(this.keepAliveTimer as unknown as { unref?: () => void }).unref?.()
+  }
+
+  stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer)
+      this.keepAliveTimer = null
+    }
+  }
+
+  /** 供测试直接调用：一次保活检查 */
+  async keepAliveOnce(): Promise<'idle' | 'ok' | 'dropped'> {
+    const client = this.client
+    if (!client) return 'idle'
+    if (client.usable === false) {
+      await this.close().catch(() => undefined)
+      return 'dropped'
+    }
+    if (typeof client.noop !== 'function') return 'ok'
+    try {
+      const ok = await client.noop()
+      if (ok === false) throw new Error('noop returned false')
+      this.keepAliveFailures = 0
+      return 'ok'
+    } catch (e) {
+      this.keepAliveFailures += 1
+      this.logger?.warn('imap.keepalive.failed', {
+        failures: this.keepAliveFailures,
+        reason: e instanceof Error ? e.message : String(e)
+      })
+      if (this.keepAliveFailures >= this.timeouts.keepAliveMaxFailures) {
+        this.keepAliveFailures = 0
+        await this.close().catch(() => undefined)
+        this.logger?.info('imap.keepalive.recycled')
+        return 'dropped'
+      }
+      return 'idle'
+    }
+  }
+
+  /** 连接是否可用（界面/日志用） */
+  isConnected(): boolean {
+    return Boolean(this.client) && this.client?.usable !== false
   }
 
   async openInboxReadOnly(): Promise<MailboxInfo> {
@@ -324,6 +490,7 @@ export class ImapMailProvider implements MailProvider {
   }
 
   async close(): Promise<void> {
+    this.stopKeepAlive()
     if (this.lock) {
       try {
         this.lock.release()

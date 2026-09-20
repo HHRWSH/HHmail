@@ -295,6 +295,52 @@ async function main(): Promise<void> {
   })
   autoSync.start()
 
+  // ---------- IMAP 连接保温（V1.2 真机修复：同步很慢 / 同步不上） ----------
+  // 真机日志显示：一次「没有任何新邮件」的同步耗时 122 秒，其中 120 秒全在**建连**上
+  // （imapflow 默认 connectionTimeout≈90s，网络半死时挂满整个周期）。
+  // 现在 a) 建连有 15 秒硬超时 + 最多 3 次快速重试（见 mail/imap.ts）；
+  //      b) 这里做「保温」：定期 NOOP 让连接保持热状态，断线时立刻在后台重连，
+  //         这样用户点同步时通常已经是热连接，几秒内完成，而不是现场握手两分钟。
+  {
+    const providerAny = ctx?.provider as unknown as {
+      startKeepAlive?: () => void
+      stopKeepAlive?: () => void
+      isConnected?: () => boolean
+      connect?: () => Promise<void>
+      keepAliveOnce?: () => Promise<string>
+    }
+    providerAny?.startKeepAlive?.()
+    const WARM_INTERVAL_MS = 90_000
+    const warmTimer = setInterval(() => {
+      void (async () => {
+        if (!ctx) return
+        try {
+          const status = await ctx.auth.status()
+          if (!status.loggedIn) return
+          if (providerAny?.isConnected && !providerAny.isConnected()) {
+            const startedAt = Date.now()
+            await providerAny.connect?.()
+            logger.info('imap.warm.reconnected', { elapsedMs: Date.now() - startedAt })
+          } else {
+            // 连接在 → 顺手保活一次（NOOP），失败会自动回收
+            await providerAny?.keepAliveOnce?.()
+          }
+        } catch (e) {
+          logger.warn('imap.warm.failed', { reason: e instanceof Error ? e.message : String(e) })
+        }
+      })()
+    }, WARM_INTERVAL_MS)
+    ;(warmTimer as unknown as { unref?: () => void }).unref?.()
+    app.on('will-quit', () => {
+      clearInterval(warmTimer)
+      try {
+        providerAny?.stopKeepAlive?.()
+      } catch {
+        /* ignore */
+      }
+    })
+  }
+
   // 窗口重新获得焦点时：如果已经陈旧（超过一个间隔没成功同步）就补一次
   // —— 用户「打开应用发现邮件没更新」的场景靠这条兜底（不依赖激活窗口的渲染端定时器）
   app.on('browser-window-focus', () => {

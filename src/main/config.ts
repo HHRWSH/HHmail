@@ -88,6 +88,35 @@ export const DEFAULT_REFRESH_INTERVAL_SEC = 300
 
 /** 单封取正文兜底超时（毫秒）：无法确认 UID 是否存在时使用。 */
 export const FETCH_BODY_TIMEOUT_MS = 25_000
+
+/**
+ * IMAP 连接的时间边界（V1.2 真机修复「同步很慢/同步不上」）。
+ *
+ * 真机证据（app.log）：一次「没有任何新邮件」的同步竟然耗时 122 秒，逐事件打点后发现：
+ *   sync.auto.start → （120s 无任何日志）→ imap.connected → 实际干活仅 2 秒
+ * 也就是说 120 秒全花在**建连**上：imapflow 默认 connectionTimeout ≈ 90s，
+ * 网络/TLS 一旦半死不活，这一次建连就会挂住整个同步周期，
+ * 调度器看门狗 120 秒才把它踢掉，用户看到的就是「一直同步中 / 同步不上」。
+ *
+ * 现在给每个阶段都设硬上限，并允许短重试；配合 NOOP 保活，
+ * 让「连接挂了」在后台就被换掉，而不是等到用户点同步才卡两分钟。
+ */
+export const IMAP_CONNECT_TIMEOUT_MS = 15_000
+export const IMAP_GREETING_TIMEOUT_MS = 10_000
+export const IMAP_SOCKET_TIMEOUT_MS = 60_000
+/**
+ * 建连尝试次数（含首次）；每次都是独立的硬超时。
+ * 取 2：最坏 15s + 1.5s + 15s ≈ 31.5s，仍小于 45s 的看门狗；
+ * 再多试一次「用户等更久」的收益很低（第 3 次能成功的情况极少）。
+ */
+export const IMAP_CONNECT_ATTEMPTS = 2
+/** 重试之间的退避（毫秒，按序号取，最后一个复用） */
+export const IMAP_CONNECT_BACKOFF_MS = [0, 1_500]
+/** NOOP 保活间隔：连接闲置超过这个时间就发一次 NOOP，避免被中间设备悄悄断开 */
+export const IMAP_KEEPALIVE_MS = 150_000
+/** 保活判定「需要重连」的连续失败次数 */
+export const IMAP_KEEPALIVE_MAX_FAILURES = 2
+
 /** envelope 已确认存在的邮件取正文超时（毫秒）：真机单封可达 40s+，宁可慢也不丢信。 */
 export const CONFIRMED_FETCH_TIMEOUT_MS = 120_000
 
