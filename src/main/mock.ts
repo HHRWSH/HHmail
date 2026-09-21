@@ -12,6 +12,7 @@ import {
   DEFAULT_BRAND_NAME,
   DEFAULT_BRAND_SUBTITLE,
   DEFAULT_LIST_PAGE_SIZE,
+  DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_SUMMARY_PROMPT
 } from '../shared/defaults'
 import { DEFAULT_TAG_VOCABULARY } from '../shared/tags'
@@ -251,6 +252,7 @@ export class MockSettingsStore implements SettingsStore {
       brandName: DEFAULT_BRAND_NAME,
       brandSubtitle: DEFAULT_BRAND_SUBTITLE,
       listPageSize: DEFAULT_LIST_PAGE_SIZE,
+      showRemoteImages: DEFAULT_SHOW_REMOTE_IMAGES,
       relativeTime: true,
       openMailMarksRead: true,
       syncOnStartup: false,

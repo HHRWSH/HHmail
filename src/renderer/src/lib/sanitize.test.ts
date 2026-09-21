@@ -12,10 +12,12 @@ describe('HTML 正文净化（规范 §2 第 10 条）', () => {
     expect(clean).not.toContain('<iframe')
   })
 
-  it('默认不加载远程图片：<img> 全部移除（防跟踪像素）', () => {
+  it('不显示图片时：只移除**远程**图片（c 防跟踪像素），内嵌 cid: 保留', () => {
     const html = '<p>正文</p><img src="https://track.example.com/pixel.gif"><img src="cid:inline">'
     const clean = sanitizeHtml(html)
-    expect(clean).not.toContain('<img')
+    expect(clean).not.toContain('track.example.com')
+    // 内嵌图片属于邮件自身内容，不该被误删（旧实现把 data:/cid: 一起删了 → 图片型邮件变空白）
+    expect(clean).toContain('cid:inline')
     expect(clean).toContain('正文')
   })
 
@@ -37,5 +39,29 @@ describe('HTML 正文净化（规范 §2 第 10 条）', () => {
     expect(sanitizeLink('https://example.edu')).toBe('https://example.edu')
     expect(sanitizeLink('javascript:alert(1)')).toBe('#')
     expect(sanitizeLink('file:///x')).toBe('#')
+  })
+})
+
+describe('邮件图片策略（真机反馈：图片型邮件打开一片空白）', () => {
+  const html = '<p>hi</p><img src="https://tracker.example.com/a.png"><img src="data:image/png;base64,AAA"><img src="cid:logo@x">'
+
+  it('默认（显示图片）→ 远程与内嵌都保留', () => {
+    const out = sanitizeHtml(html, { allowRemoteImages: true })
+    expect(out).toContain('https://tracker.example.com/a.png')
+    expect(out).toContain('data:image/png;base64,AAA')
+    expect(out).toContain('cid:logo@x')
+  })
+
+  it('关掉显示图片 → 只拦远程图，内嵌 data:/cid: 仍保留（那是邮件自身内容）', () => {
+    const out = sanitizeHtml(html, { allowRemoteImages: false })
+    expect(out).not.toContain('tracker.example.com')
+    expect(out).toContain('data:image/png;base64,AAA')
+    expect(out).toContain('cid:logo@x')
+  })
+
+  it('非常规协议的图片一律剥掉（javascript: / 相对路径）', () => {
+    const out = sanitizeHtml('<img src="javascript:alert(1)"><img src="/local.png">', { allowRemoteImages: true })
+    expect(out).not.toContain('javascript:')
+    expect(out).not.toContain('/local.png')
   })
 })

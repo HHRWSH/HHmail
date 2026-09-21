@@ -56,7 +56,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
   // 可勾选的标签 = 设置里的词表 ∪ 这封邮件已有的标签（含 AI/规则给的）
   const tagChoices = useMemo(
     () => mergeTags(mail?.manualTags, mail?.autoTags, parseVocabulary(settings.tagVocabulary)).slice(0, 40),
-    [mail?.manualTags, mail?.autoTags, settings.tagVocabulary]
+    [mail?.manualTags, mail?.autoTags, settings.tagVocabulary, settings.showRemoteImages]
   )
   const [labelInput, setLabelInput] = useState('')
   const [labelBusy, setLabelBusy] = useState(false)
@@ -170,6 +170,23 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
     },
     [mail, labelBusy, load, onToast, onMailChanged]
   )
+
+  /** 恢复默认：清空这封邮件的手动标签（自动标签保留；手动加的"抑制"也一起恢复） */
+  const clearManualTags = useCallback(async () => {
+    if (!mail) return
+    setTagBusy(true)
+    try {
+      await api.clearManualTags(mail.id)
+      await load(mail.id)
+      onMailChanged?.()
+      onLabelsChanged?.()
+      onToast('已恢复默认：手动标签已清空（自动标签保留）')
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setTagBusy(false)
+    }
+  }, [mail, onToast, load, onMailChanged, onLabelsChanged])
 
   /** 手动标签：勾选/取消（统一标签体系；去掉自动标签会记入抑制表，重算不会加回来） */
   const toggleTag = useCallback(
@@ -358,7 +375,8 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
   // DOMPurify 净化只依赖正文与图片开关，缓存避免每次渲染重复净化（长正文是切页卡顿主因之一）
   // 注意：必须在提前 return 之前调用（React hooks 顺序规则）
   const bodyHtml = useMemo(
-    () => (mail && mail.bodyHtml ? sanitizeHtml(mail.bodyHtml, { allowRemoteImages: false }) : null),
+    // 图片策略跟随设置「显示邮件图片」（默认开）。关掉时只拦远程图片，内嵌 data:/cid: 仍保留。
+    () => (mail && mail.bodyHtml ? sanitizeHtml(mail.bodyHtml, { allowRemoteImages: settings.showRemoteImages }) : null),
     [mail?.bodyHtml]
   )
 
@@ -563,6 +581,15 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
                 data-testid="tag-add-btn"
               >
                 ＋ 手动打标签
+              </button>
+              <button
+                className="btn ghost sm"
+                onClick={() => void clearManualTags()}
+                disabled={tagBusy || (mail.manualTags ?? []).length === 0}
+                title="清空这封邮件的手动标签（自动标签保留，等于回到系统默认判断）"
+                data-testid="tag-reset-btn"
+              >
+                ↺ 恢复默认
               </button>
             </div>
           </div>

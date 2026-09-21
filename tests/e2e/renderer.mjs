@@ -678,15 +678,21 @@ try {
   await page.waitForTimeout(250);
   check("可切回 Markdown 预览视图", (await page.locator('[data-testid="summary-markdown"]').count()) === 1);
 
-  // 远程图片：默认自动加载（用户要求不确认），点击「隐藏图片」后移除（修复项 #3）
-  // V2.2：远程图片固定不加载（「隐藏图片」按钮已按用户要求删除）
+  // 邮件图片（真机反馈：以前一律剥掉所有 <img>，图片型邮件打开是一片空白）
+  // 现在跟随设置「显示邮件图片」：默认开 → 正文里的图片保留；关掉 → 只拦远程图，内嵌 data:/cid: 保留
   const imgCount = await page.locator('[data-testid="detail-body"] img').count();
-  check("远程图片默认不加载（按钮已删除）", imgCount === 0 && (await page.locator('[data-testid="load-images-btn"]').count()) === 0, `实际 img=${imgCount}`);
+  check("默认显示邮件图片（不再一律剥掉 <img>）", imgCount >= 1, `实际 img=${imgCount}`);
 
   // V2.2：自动标签（先批量生成摘要 → 规则标签出现 → 点标签筛选）
   await page.click('[data-nav="settings"]');
   await page.waitForSelector('[data-testid="settings-page"]', { timeout: 5000 });
   // 前面的「AI 总结」已经为第一封生成过索引卡片 → 直接按卡片重算规则标签（不再批量总结，避免覆盖摘要）
+  check("设置页有「显示邮件图片」开关", (await page.locator('[data-testid="show-remote-images"]').count()) === 1);
+  check("词表有「恢复默认词表」按钮", (await page.locator('[data-testid="reset-tag-vocab"]').count()) === 1);
+  await page.click('[data-testid="reset-tag-vocab"]');
+  await page.waitForTimeout(200);
+  const vocabAfterReset = await page.locator('[data-testid="tag-vocab-editor"] .vocab-chip').count();
+  check("点「恢复默认词表」后词表恢复出默认标签", vocabAfterReset > 0, `实际 ${vocabAfterReset} 个`);
   await page.click('[data-testid="rebuild-tags"]');
   await page.waitForTimeout(600);
   const tagCounts = await page.$eval('[data-testid="tag-counts"]', (el) => el.textContent || "").catch(() => "");
@@ -861,30 +867,6 @@ try {
   await page.waitForTimeout(700);
   const backInbox = await page.locator(".mail-list .mail-item").count();
   check("切回收件箱恢复 20 封", backInbox === 20, `实际 ${backInbox}`);
-
-  // 自定义视图（V2 M5：保存当前筛选 → 侧边栏导航 → 筛选/删除）
-  await page.click('[data-nav="unread"]');
-  await page.waitForTimeout(300);
-  const unreadBeforeView = await page.locator(".mail-list .mail-item").count();
-  await page.click('[data-testid="save-view-btn"]');
-  await page.waitForSelector('[data-testid="save-view-bar"]');
-  await page.fill('[data-testid="view-name-input"]', "未读视图");
-  await page.click('[data-testid="view-save-confirm"]');
-  await page.waitForTimeout(500);
-  await page.waitForSelector('[data-nav="view:1"]', { timeout: 3000 });
-  check("保存视图后侧边栏出现", true);
-  await page.click('[data-nav="unread"]');
-  await page.waitForTimeout(300);
-  await page.click('[data-nav="view:1"]');
-  await page.waitForTimeout(700);
-  const viewTitle = await page.$eval(".topbar .title", (el) => el.textContent).catch(() => "");
-  check("视图标题显示", viewTitle.includes("未读视图"), viewTitle);
-  const viewCount = await page.locator(".mail-list .mail-item").count();
-  check("视图按未读筛选", viewCount === unreadBeforeView, `实际 ${viewCount}（预期 ${unreadBeforeView}）`);
-  await page.click('[data-testid="view-del"]');
-  await page.waitForTimeout(500);
-  const viewNavs = await page.locator('[data-nav^="view:"]').count();
-  check("删除视图后侧边栏移除", viewNavs === 0, `实际 ${viewNavs}`);
 
   // 稍后提醒（V2 M6：详情页设置 → 列表分组 → 取消）
   await page.click(".mail-list .mail-item");

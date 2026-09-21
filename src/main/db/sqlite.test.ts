@@ -338,67 +338,6 @@ describe('SqliteMessageStore —— 真实 better-sqlite3 契约测试', () => {
     }
   })
 
-  it('V2 M5：视图 CRUD + filter/sort 查询（与纯函数同语义）', async () => {
-    // 数据准备：已有 uid 103（毕业论文/实验数据）、104（VPN）、107（附件）等
-    const label = await store.createLabel('课业')
-    const list = await store.query({ limit: 100, offset: 0 })
-    const vpn = list.find((m) => m.uid === 104)!
-    await store.setMailLabels(vpn.id, [label.id])
-
-    // 保存视图
-    const saved = await store.saveView({
-      name: 'VPN 邮件',
-      filter: { text: 'VPN' },
-      sort: { by: 'date', dir: 'desc' }
-    })
-    expect(saved.id).toBeGreaterThan(0)
-    const saved2 = await store.saveView({
-      name: '未读+课业标签',
-      filter: { unread: true, labelIds: [label.id] },
-      sort: { by: 'subject', dir: 'asc' }
-    })
-    expect((await store.listViews()).map((v) => v.name)).toEqual(['VPN 邮件', '未读+课业标签'])
-
-    // 覆盖保存
-    await store.saveView({ id: saved.id, name: 'VPN 视图改', filter: { text: 'VPN' }, sort: { by: 'from', dir: 'asc' } })
-    const viewsAfter = await store.listViews()
-    expect(viewsAfter.find((v) => v.id === saved.id)?.name).toBe('VPN 视图改')
-    expect(viewsAfter).toHaveLength(2)
-
-    // filter 查询：text 命中
-    const byText = await store.query({ limit: 100, offset: 0, filter: { text: 'VPN' } })
-    expect(byText.some((m) => m.uid === 104)).toBe(true)
-    expect(byText.every((m) => m.uid === 104)).toBe(true)
-
-    // filter 查询：unread + labelIds
-    await store.markRead(vpn.id, true)
-    const byLabel = await store.query({ limit: 100, offset: 0, filter: { labelIds: [label.id], unread: true } })
-    expect(byLabel.some((m) => m.uid === 104)).toBe(false)
-    await store.markRead(vpn.id, false)
-    const byLabel2 = await store.query({ limit: 100, offset: 0, filter: { labelIds: [label.id], unread: true } })
-    expect(byLabel2.some((m) => m.uid === 104)).toBe(true)
-
-    // filter 查询：from / hasAttachment / dateFrom/dateTo
-    const byFrom = await store.query({ limit: 100, offset: 0, filter: { from: 'lin@example' } })
-    expect(byFrom.length).toBeGreaterThan(0)
-    expect(byFrom.every((m) => m.fromAddr.includes('lin@example'))).toBe(true)
-    const byAtt = await store.query({ limit: 100, offset: 0, filter: { hasAttachment: true } })
-    expect(byAtt.some((m) => m.uid === 107)).toBe(true)
-    const byDate = await store.query({ limit: 100, offset: 0, filter: { dateFrom: 103_000, dateTo: 104_000 } })
-    expect(byDate.every((m) => m.dateTs >= 103_000 && m.dateTs <= 104_000)).toBe(true)
-    expect(byDate.some((m) => m.uid === 103)).toBe(true)
-
-    // sort 查询：subject asc（忽略大小写）
-    const sorted = await store.query({ limit: 100, offset: 0, sort: { by: 'subject', dir: 'asc' } })
-    const subjects = sorted.map((m) => m.subject.toLowerCase())
-    expect([...subjects].sort()).toEqual(subjects)
-
-    // 删除视图
-    await store.deleteView(saved2.id)
-    expect((await store.listViews()).map((v) => v.id)).toEqual([saved.id])
-    await store.deleteView(999999) // 幂等不抛
-    expect((await store.listViews())).toHaveLength(1)
-  })
 
   it('V2 M6：稍后提醒 CRUD + 到期查询 + 列表/详情透出', async () => {
     const list = await store.query({ limit: 100, offset: 0 })
@@ -972,29 +911,6 @@ describe('SqliteMessageStore —— 真实 better-sqlite3 契约测试', () => {
     expect(bodyHits.map((h) => h.id)).toContain(fees.id)
   })
 
-  it('M4：结构化过滤路保持「未来最近截止优先」（集合视图不做相关性重排）', async () => {
-    await store.upsertMessages([
-      makeMsg(711, { subject: 'Locker Application / 儲物箱申請' }),
-      makeMsg(712, { subject: 'Tuition Fee Notice for Term 1' })
-    ])
-    const inbox = await store.query({ limit: 200, offset: 0 })
-    const a = inbox.find((m) => m.uid === 711)!
-    const b = inbox.find((m) => m.uid === 712)!
-    const soon = Date.now() + 86_400_000
-    const later = Date.now() + 5 * 86_400_000
-    // 相关性上「学费」只在 b 上，但 b 的截止更晚 → 过滤路仍按截止时间排（a 在前）
-    await store.saveIndexDoc({
-      messageId: a.id, card: '[TYPE] 行政', type: '行政', course: null, term: null, dueTs: soon,
-      entities: [], aliases: [], questions: [], model: 'm'
-    })
-    await store.saveIndexDoc({
-      messageId: b.id, card: '[TYPE] 行政\n[FACTS]\n- 学费缴纳', type: '行政', course: null, term: null, dueTs: later,
-      entities: [], aliases: [], questions: [], model: 'm'
-    })
-    const filtered = await store.searchIndexByFilter({ type: '行政' }, 10)
-    const ids = filtered.filter((h) => h.id === a.id || h.id === b.id).map((h) => h.id)
-    expect(ids).toEqual([a.id, b.id])
-  })
 
   it('V2.2：自动标签（规则/AI 两种来源）+ 示例邮件 + 按标签查询', async () => {
     await store.upsertMessages([

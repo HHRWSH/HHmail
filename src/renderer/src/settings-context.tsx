@@ -36,6 +36,8 @@ export const FALLBACK_SETTINGS: AppSettings = {
   brandName: DEFAULT_BRAND_NAME,
   brandSubtitle: DEFAULT_BRAND_SUBTITLE,
   listPageSize: DEFAULT_LIST_PAGE_SIZE,
+
+  showRemoteImages: true,
   relativeTime: true,
   openMailMarksRead: true,
   syncOnStartup: false,

@@ -710,6 +710,11 @@ ${m.fromAddr}`.toLowerCase()
     return out.sort((a, b) => (a.dueTs ?? 0) - (b.dueTs ?? 0))
   }
 
+  /** 恢复默认：清空手动标签（内存实现） */
+  async clearManualTags(messageId: number): Promise<void> {
+    this.mailTags.delete(`manual:${messageId}`)
+  }
+
   async listTagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>> {
     const counts = new Map<string, Set<number>>()
     for (const [key, tags] of this.mailTags) {

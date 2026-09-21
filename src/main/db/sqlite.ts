@@ -1272,6 +1272,11 @@ export class SqliteMessageStore implements MessageStore {
     return rows
   }
 
+  /** 清空某封邮件的**手动**标签（自动标签不受影响）——「恢复默认」按钮用 */
+  async clearManualTags(messageId: number): Promise<void> {
+    this.db.prepare("DELETE FROM mail_tags WHERE message_id = ? AND source = 'manual'").run(messageId)
+  }
+
   async listTagCounts(): Promise<Array<{ tag: string; count: number }>> {
     const rows = this.db
       .prepare(
@@ -1522,37 +1527,6 @@ export class SqliteMessageStore implements MessageStore {
 
   // ---- V2 M5：自定义视图 ----
 
-  async listViews(): Promise<SavedView[]> {
-    const rows = this.db
-      .prepare('SELECT id, name, filter_json, sort_json, created_at FROM views ORDER BY id')
-      .all() as { id: number; name: string; filter_json: string; sort_json: string; created_at: number }[]
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      filter: JSON.parse(r.filter_json) as ViewFilter,
-      sort: JSON.parse(r.sort_json) as ViewSort,
-      createdAt: r.created_at
-    }))
-  }
-
-  async saveView(view: { id?: number; name: string; filter: ViewFilter; sort: ViewSort }): Promise<SavedView> {
-    const filterJson = JSON.stringify(view.filter ?? {})
-    const sortJson = JSON.stringify(view.sort ?? { by: 'date', dir: 'desc' })
-    if (view.id !== undefined) {
-      this.db
-        .prepare('UPDATE views SET name = ?, filter_json = ?, sort_json = ? WHERE id = ?')
-        .run(view.name, filterJson, sortJson, view.id)
-      return { id: view.id, name: view.name, filter: view.filter, sort: view.sort, createdAt: Date.now() }
-    }
-    const info = this.db
-      .prepare('INSERT INTO views (name, filter_json, sort_json, created_at) VALUES (?, ?, ?, ?)')
-      .run(view.name, filterJson, sortJson, Date.now())
-    return { id: Number(info.lastInsertRowid), name: view.name, filter: view.filter, sort: view.sort, createdAt: Date.now() }
-  }
-
-  async deleteView(id: number): Promise<void> {
-    this.db.prepare('DELETE FROM views WHERE id = ?').run(id)
-  }
 
   // ---- V2 M6：稍后提醒 ----
 

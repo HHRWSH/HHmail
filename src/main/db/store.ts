@@ -188,6 +188,8 @@ export interface MessageStore {
   getMailTags(messageIds: number[]): Promise<Map<number, string[]>>
   /** 各自动标签的邮件数（设置页/筛选用） */
   listTagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>>
+  /** 清空某封邮件的手动标签（自动标签保留） */
+  clearManualTags(messageId: number): Promise<void>
   /** 日历：时间范围内可能有事件的邮件（含索引卡片，供上层解析日期） */
   listCalendarSources(from: number, to: number, limit?: number): Promise<CalendarSourceMail[]>
   /** 用现有索引卡片重算全部「规则标签」（A 方案；可随时重跑） */
@@ -230,12 +232,6 @@ export interface MessageStore {
   setMailLabels(messageId: number, labelIds: number[]): Promise<void>
   /** 星标开关（V2 M4） */
   setStarred(messageId: number, starred: boolean): Promise<void>
-  /** 已保存视图列表（V2 M5） */
-  listViews(): Promise<SavedView[]>
-  /** 保存视图（id 存在则覆盖），返回完整记录（V2 M5） */
-  saveView(view: { id?: number; name: string; filter: ViewFilter; sort: ViewSort }): Promise<SavedView>
-  /** 删除视图（V2 M5） */
-  deleteView(id: number): Promise<void>
   /** 设置稍后提醒（覆盖未触发的旧提醒；V2 M6） */
   setSnooze(messageId: number, snoozeUntil: number, note?: string): Promise<void>
   /** 取消未触发的稍后提醒（V2 M6） */

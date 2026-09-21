@@ -101,6 +101,7 @@ const api: WindowApi = {
     invoke(IPC_CHANNELS.MAIL_LIST_EVENTS, args),
   tagCounts: (): Promise<Array<{ tag: string; count: number }>> => invoke(IPC_CHANNELS.TAGS_COUNTS),
   tagExamples: (): Promise<TagExample[]> => invoke(IPC_CHANNELS.TAGS_EXAMPLES),
+  clearManualTags: (id: number): Promise<void> => invoke(IPC_CHANNELS.TAGS_CLEAR_MANUAL, { id }),
   setMailTagManual: (messageId: number, tag: string, on: boolean): Promise<void> =>
     invoke(IPC_CHANNELS.TAGS_SET_MANUAL, { messageId, tag, on }),
   setTagExample: (messageId: number, tags: string[]): Promise<void> =>
@@ -172,10 +173,6 @@ const api: WindowApi = {
   deleteLabel: (id: number): Promise<void> => invoke(IPC_CHANNELS.LABELS_DELETE, { id }),
   setMailLabels: (id: number, labelIds: number[]): Promise<void> => invoke(IPC_CHANNELS.MAIL_SET_LABELS, { id, labelIds }),
   toggleStar: (id: number, starred: boolean): Promise<void> => invoke(IPC_CHANNELS.MAIL_TOGGLE_STAR, { id, starred }),
-  listViews: (): Promise<SavedView[]> => invoke(IPC_CHANNELS.VIEWS_LIST),
-  saveView: (args: { id?: number; name: string; filter: ViewFilter; sort: ViewSort }): Promise<SavedView> =>
-    invoke(IPC_CHANNELS.VIEWS_SAVE, args),
-  deleteView: (id: number): Promise<void> => invoke(IPC_CHANNELS.VIEWS_DELETE, { id }),
   snoozeMail: (id: number, until: number, note?: string): Promise<void> =>
     invoke(IPC_CHANNELS.MAIL_SNOOZE, { id, until, note }),
   cancelSnooze: (id: number): Promise<void> => invoke(IPC_CHANNELS.MAIL_CANCEL_SNOOZE, { id }),

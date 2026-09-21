@@ -238,6 +238,8 @@ export function createMockBridge(): WindowApi {
     brandName: DEFAULT_BRAND_NAME,
     brandSubtitle: DEFAULT_BRAND_SUBTITLE,
     listPageSize: DEFAULT_LIST_PAGE_SIZE,
+
+    showRemoteImages: true,
     relativeTime: true,
     openMailMarksRead: true,
     syncOnStartup: false,
@@ -409,25 +411,6 @@ export function createMockBridge(): WindowApi {
       else starred.delete(id)
     },
     // ---- V2 M5：自定义视图 ----
-    async listViews() {
-      return [...views]
-    },
-    async saveView(args) {
-      if (args.id !== undefined) {
-        const idx = views.findIndex((v) => v.id === args.id)
-        if (idx >= 0) {
-          const updated: SavedView = { ...views[idx], name: args.name, filter: args.filter, sort: args.sort }
-          views = views.map((v) => (v.id === args.id ? updated : v))
-          return updated
-        }
-      }
-      const view: SavedView = { id: nextViewId++, name: args.name, filter: args.filter, sort: args.sort, createdAt: Date.now() }
-      views = [...views, view]
-      return view
-    },
-    async deleteView(id) {
-      views = views.filter((v) => v.id !== id)
-    },
     // ---- V2 M6：稍后提醒 ----
     async snoozeMail(id, until) {
       snoozes.set(id, until)
@@ -932,6 +915,9 @@ export function createMockBridge(): WindowApi {
         subject: mails.find((m) => m.id === id)?.subject ?? '(无主题)',
         tags
       }))
+    },
+    async clearManualTags(id: number) {
+      mockManualTags.delete(id)
     },
     async setMailTagManual(messageId: number, tag: string, on: boolean) {
       const cur = mockTagsByMail.get(messageId) ?? []

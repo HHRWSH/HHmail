@@ -10,7 +10,7 @@ import { KnowledgePage } from './pages/Knowledge'
 import { CalendarPage } from './pages/Calendar'
 import { AISearchPage } from './pages/AISearch'
 import { DraftsPage } from './pages/Drafts'
-import type { AppSettings, AuthStatus, SavedView } from '@shared/types'
+import type { AppSettings, AuthStatus } from '@shared/types'
 
 export interface PageProps {
   auth: AuthStatus
@@ -27,10 +27,6 @@ export interface PageProps {
   filterTitle?: string
   /** 标签数据变化（新建等）→ 通知 App 刷新侧边栏（V2 M4） */
   onLabelsChanged?: () => void
-  /** 当前激活的自定义视图（V2 M5） */
-  view?: SavedView | null
-  /** 视图数据变化 → 通知 App 刷新侧边栏（V2 M5） */
-  onViewsChanged?: () => void
   /** 本页面当前是否为激活页（V2.1 常驻挂载后，快捷键等全局交互只在激活时响应） */
   isActive?: boolean
   /** 退出登录（设置页用于「重新登录以应用发信权限」） */

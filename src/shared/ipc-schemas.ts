@@ -300,6 +300,9 @@ export const tagManualSchema = z
   .strict()
 
 /** 标签示例：设置/取消某封邮件的示例标签（空数组 = 取消） */
+/** 恢复默认：清空某封邮件的手动标签 */
+export const clearManualTagsSchema = z.object({ id: z.number().int().positive() }).strict()
+
 export const tagExampleSchema = z
   .object({
     messageId: z.number().int().positive(),

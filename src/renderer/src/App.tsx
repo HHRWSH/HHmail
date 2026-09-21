@@ -51,8 +51,6 @@ export function App() {
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null)
   const [activeAutoTag, setActiveAutoTag] = useState<string | null>(null)
   // V2 M5：自定义视图
-  const [views, setViews] = useState<SavedView[]>([])
-  const [activeViewId, setActiveViewId] = useState<number | null>(null)
   // 侧边栏分组折叠状态（本地持久化）
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
   // V2.2：外观与行为设置（主题/密度/品牌名/列表条数…）
@@ -234,44 +232,6 @@ export function App() {
     }
   }, [auth?.loggedIn])
 
-  // 已保存视图列表（V2 M5）
-  const reloadViews = useCallback(() => {
-    api
-      .listViews()
-      .then(setViews)
-      .catch(() => setViews([]))
-  }, [])
-
-  useEffect(() => {
-    if (!auth?.loggedIn) return
-    let mounted = true
-    api
-      .listViews()
-      .then((v) => {
-        if (mounted) setViews(v)
-      })
-      .catch(() => {
-        if (mounted) setViews([])
-      })
-    return () => {
-      mounted = false
-    }
-  }, [auth?.loggedIn])
-
-  const handleDeleteView = useCallback(
-    (id: number) => {
-      api
-        .deleteView(id)
-        .then(() => {
-          reloadViews()
-          if (activeViewId === id) setActiveViewId(null)
-          showToast('视图已删除')
-        })
-        .catch(() => showToast('删除视图失败'))
-    },
-    [activeViewId, reloadViews, showToast]
-  )
-
   useEffect(() => {
     let mounted = true
     api
@@ -313,18 +273,14 @@ export function App() {
   // memo 化的收件箱页面也就不重渲染、不重新查询（用户反馈"点了红旗没反应"）。
   const labelFilter = useMemo(
     () =>
-      active === 'inbox' && activeViewId === null && activeStarred
+      active === 'inbox' && activeStarred
         ? { starredOnly: true }
-        : active === 'inbox' && activeViewId === null && activeFlagged
+        : active === 'inbox' && activeFlagged
           ? { flaggedOnly: true }
-          : active === 'inbox' && activeViewId === null && activeLabelId !== null
+          : active === 'inbox' && activeLabelId !== null
             ? { labelIds: [activeLabelId] }
             : undefined,
-    [active, activeViewId, activeStarred, activeFlagged, activeLabelId]
-  )
-  const activeView = useMemo(
-    () => (active === 'inbox' ? views.find((v) => v.id === activeViewId) ?? null : null),
-    [active, activeViewId, views]
+    [active, activeStarred, activeFlagged, activeLabelId]
   )
   const filterTitle = useMemo(
     () => (activeLabelId !== null ? labels.find((l) => l.id === activeLabelId)?.name : undefined),
@@ -344,8 +300,6 @@ export function App() {
       labelFilter,
       filterTitle,
       onLabelsChanged: active === 'inbox' ? reloadLabels : undefined,
-      view: activeView,
-      onViewsChanged: active === 'inbox' ? reloadViews : undefined,
       onAskAI: (question: string) => {
         setAiQuestion(question)
         setActive('ai')
@@ -369,14 +323,12 @@ export function App() {
       activeFolder,
       labelFilter,
       filterTitle,
-      activeView,
       activeAutoTag,
       activeUnreadOnly,
       activeCategoryId,
       showToast,
       handleOpenMail,
       reloadLabels,
-      reloadViews,
       settings
     ]
   )
@@ -425,7 +377,6 @@ export function App() {
     setActiveUnreadOnly(patch.unread === true)
     setActiveAutoTag(patch.autoTag ?? null)
     setActiveCategoryId(patch.categoryId ?? null)
-    setActiveViewId(null)
     setActive('inbox')
   }
 
@@ -434,7 +385,6 @@ export function App() {
     setActiveLabelId(null)
     setActiveStarred(false)
     setActiveFlagged(false)
-    setActiveViewId(null)
     setActiveAutoTag(null)
     setActiveUnreadOnly(false)
   }
@@ -494,7 +444,7 @@ export function App() {
                   <div key={`wrap:${f.path}`}>
                   <div
                     key={f.path}
-                    className={`nav-item ${active === 'inbox' && activeFolder === f.path && activeLabelId === null && !activeStarred && !activeFlagged && activeViewId === null ? 'active' : ''}`}
+                    className={`nav-item ${active === 'inbox' && activeFolder === f.path && activeLabelId === null && !activeStarred && !activeFlagged ? 'active' : ''}`}
                     onClick={() => {
                       setActiveFolder(f.path)
                       clearInboxFilters()
@@ -574,39 +524,6 @@ export function App() {
               </>
             )}
 
-            {views.length > 0 && (
-              <>
-                {sectionHead('views', '视图')}
-                {!collapsed.has('views') &&
-                  views.map((v) => (
-                    <div
-                      key={v.id}
-                      className={`nav-item ${active === 'inbox' && activeViewId === v.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setActiveViewId(v.id)
-                        setActiveLabelId(null)
-                        setActiveStarred(false)
-                        setActiveFolder('INBOX')
-                        setActive('inbox')
-                      }}
-                      data-nav={`view:${v.id}`}
-                    >
-                      <span className="ico">🗂</span> {v.name}
-                      <span
-                        className="view-del"
-                        title="删除视图"
-                        data-testid="view-del"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteView(v.id)
-                        }}
-                      >
-                        ×
-                      </span>
-                    </div>
-                  ))}
-              </>
-            )}
           </nav>
         </div>
 

@@ -81,14 +81,14 @@ try {
   });
   const expected = [
     "askInbox", "bulkAddLabels", "bulkMarkRead", "cancelSnooze", "createLabel", "deleteDraft", "deleteLabel",
-    "deleteView", "downloadAttachment", "getAuthStatus", "getMail", "getSettings", "listDrafts", "listEvents", "listFolders",
-    "listLabels", "listMails", "listViews", "logout", "markMailRead", "onDeviceCodeEvent", "onNewMail",
+    "downloadAttachment", "getAuthStatus", "getMail", "getSettings", "listDrafts", "listEvents", "listFolders",
+    "listLabels", "listMails", "logout", "markMailRead", "onDeviceCodeEvent", "onNewMail",
     "onSummaryProgress", "onSyncProgress", "openExternal", "probeSendCapability", "resyncMail", "saveDraft",
-    "cancelSummarize", "collectionMails", "indexStats", "listCollections", "setCollectionExcluded", "weeklyBrief", "listSentItems", "deleteSentItem", "saveSettings", "saveView", "sendMail", "sendTestMail",
+    "cancelSummarize", "collectionMails", "indexStats", "listCollections", "setCollectionExcluded", "weeklyBrief", "listSentItems", "deleteSentItem", "saveSettings", "sendMail", "sendTestMail",
     "searchMail", "setMailLabels", "snoozeMail", "startDeviceCode", "summarizeMail", "summarizePending", "syncMail",
     "toggleStar",
     // M4 聊天式 AI 助手
-    "chatAsk", "chatMessages", "chatSessions", "deleteChatSession", "newChatSession", "renameChatSession",
+    "chatAsk", "chatMessages", "chatSessions", "clearManualTags", "deleteChatSession", "newChatSession", "renameChatSession",
     // V2.2：附件保存到指定目录 + 目录选择/打开 + 自动标签
     "saveAttachment", "pickDirectory", "openPath",
     "tagCounts", "tagExamples", "setTagExample", "rebuildTags", "setMailTagManual",
@@ -441,30 +441,10 @@ try {
   const backInbox = await window.locator(".mail-list .mail-item").count();
   check("回到收件箱恢复 20 封", backInbox === 20, `实际 ${backInbox}`);
 
-  // 自定义视图（V2 M5：真实 IPC → SQLite views 表 + filter/sort 查询）
-  await window.click('[data-nav="unread"]');
-  await window.waitForTimeout(500);
-  await window.click('[data-testid="save-view-btn"]');
-  await window.waitForSelector('[data-testid="save-view-bar"]');
-  await window.fill('[data-testid="view-name-input"]', "未读视图");
-  await window.click('[data-testid="view-save-confirm"]');
-  await window.waitForTimeout(800);
-  await window.waitForSelector('[data-nav="view:1"]', { timeout: 3000 });
-  check("保存视图后侧边栏出现（真实 store）", true);
-  await window.click('[data-nav="view:1"]');
-  await window.waitForTimeout(1000);
-  const viewTitle = await window.$eval(".topbar .title", (el) => el.textContent).catch(() => "");
-  check("视图标题显示", viewTitle.includes("未读视图"), viewTitle);
-  const viewCount = await window.locator(".mail-list .mail-item").count();
-  check("视图按未读筛选（真实 store）", viewCount >= 1, `实际 ${viewCount}`);
-  await window.click('[data-testid="view-del"]');
-  await window.waitForTimeout(800);
-  const viewNavs = await window.locator('[data-nav^="view:"]').count();
-  check("删除视图后侧边栏移除", viewNavs === 0, `实际 ${viewNavs}`);
-
-  // 稍后提醒（V2 M6：真实 IPC → SQLite snoozes 表）；先切回「全部」避免已读过滤干扰
-  await window.click('[data-nav="unread"]');
-  await window.waitForTimeout(500);
+  // 稍后提醒（V2 M6：真实 IPC → SQLite snoozes 表）；先切回收件箱「全部」，
+  // 否则打开邮件会被标记已读 → 从不带未读筛选的列表里消失（真机/E2E 都踩过）
+  await window.click('[data-nav="inbox"]');
+  await window.waitForTimeout(600);
   await window.click(".mail-list .mail-item");
   await window.waitForSelector('[data-testid="snooze-btn"]');
   await window.click('[data-testid="snooze-btn"]');

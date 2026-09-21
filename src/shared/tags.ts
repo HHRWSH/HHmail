@@ -57,6 +57,14 @@ export function normalizeTag(raw: string): string | null {
 }
 
 /** 解析设置里的词表（逗号/换行/顿号分隔，去重、保序）。 */
+/**
+ * 「恢复默认」用：把标签词表还原成内置默认（设置页按钮调用，纯函数便于单测）。
+ * 注意：只还原**词表**，不动用户给邮件手动打的标签（那些是邮件维度的数据）。
+ */
+export function defaultTagVocabularyText(): string {
+  return vocabularyToText(DEFAULT_TAG_VOCABULARY)
+}
+
 export function parseVocabulary(text: string, fallback: readonly string[] = DEFAULT_TAG_VOCABULARY): string[] {
   const out: string[] = []
   for (const piece of String(text ?? '').split(/[,，、\n\r;；]+/)) {

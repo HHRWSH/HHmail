@@ -3,7 +3,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { createPortal } from 'react-dom'
-import type { AuthStatus, MailLabel, MailListItem, SavedView, SyncProgress, ViewFilter } from '@shared/types'
+import type { AuthStatus, MailLabel, MailListItem, SyncProgress } from '@shared/types'
 import { formatListTime } from '@shared/format'
 import { parseVocabulary, visibleTags } from '@shared/tags'
 import { avatarColor, avatarInitial } from '@shared/avatar'
@@ -34,7 +34,6 @@ interface Props {
   /** 标签数据变化 → 通知 App 刷新侧边栏（V2 M4） */
   onLabelsChanged?: () => void
   /** 当前激活的自定义视图（V2 M5；与标签/星标过滤互斥） */
-  view?: SavedView | null
   /** 视图数据变化 → 通知 App 刷新侧边栏（V2 M5） */
   onViewsChanged?: () => void
   /** 本页面是否为激活页（V2.1：常驻挂载后，快捷键只在激活时响应） */
@@ -183,8 +182,6 @@ export const InboxPage = memo(function InboxPage({
   unreadOnly: unreadOnlyProp,
   categoryId,
   onLabelsChanged,
-  view,
-  onViewsChanged,
   isActive = true
 }: Props) {
   const settings = useSettings()
@@ -216,10 +213,6 @@ export const InboxPage = memo(function InboxPage({
   const [loading, setLoading] = useState(true)
   const [shownCount, setShownCount] = useState(settings.listPageSize)
   const [refreshSec, setRefreshSec] = useState<number | null>(null)
-  // V2 M5：保存为视图弹层
-  const [saveViewOpen, setSaveViewOpen] = useState(false)
-  const [viewName, setViewName] = useState('')
-  const [savingView, setSavingView] = useState(false)
   // V2 M7：批量选择 + 批量工具栏（勾选框仅在「多选模式」下显示，右键进入）
   const [selection, setSelection] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
@@ -259,7 +252,7 @@ export const InboxPage = memo(function InboxPage({
   // 换文件夹/换筛选时回到第一屏
   useEffect(() => {
     setRenderLimit(40)
-  }, [folderPath, labelFilter, view?.id, autoTagFilter, unreadOnly, categoryId])
+  }, [folderPath, labelFilter, autoTagFilter, unreadOnly, categoryId])
 
   const loadList = useCallback(async (term: string) => {
     try {
@@ -267,17 +260,15 @@ export const InboxPage = memo(function InboxPage({
       // 浏览器把滚动位置夹回顶部 —— 这就是点「加载更多」后"回到最初位置"的原因）。
       const items = term.trim()
         ? await api.searchMail(term.trim())
-        : view
-          ? await api.listMails({ limit: fetchLimitRef.current, folder: 'INBOX', filter: view.filter, sort: view.sort })
-          : await api.listMails({
-              limit: fetchLimitRef.current,
-              folder: folderPath,
-              labelIds: labelFilter?.labelIds,
-              starredOnly: labelFilter?.starredOnly,
-              flaggedOnly: labelFilter?.flaggedOnly,
-              categoryId: categoryId ?? undefined,
-              autoTags: tagFilters.length > 0 ? tagFilters : undefined
-            })
+        : await api.listMails({
+            limit: fetchLimitRef.current,
+            folder: folderPath,
+            labelIds: labelFilter?.labelIds,
+            starredOnly: labelFilter?.starredOnly,
+            flaggedOnly: labelFilter?.flaggedOnly,
+            categoryId: categoryId ?? undefined,
+            autoTags: tagFilters.length > 0 ? tagFilters : undefined
+          })
       setMails(items)
       // 角标显示真实总数（列表只取前 fetchLimit 封，之前会误显示成"共 200 封"）
       void api
@@ -288,7 +279,6 @@ export const InboxPage = memo(function InboxPage({
           flaggedOnly: labelFilter?.flaggedOnly,
           categoryId: categoryId ?? undefined,
           unreadOnly,
-          filter: view?.filter,
           autoTags: tagFilters.length > 0 ? tagFilters : undefined
         })
         .then((n) => setTotalCount(typeof n === 'number' && n > 0 ? n : items.length))
@@ -309,7 +299,7 @@ export const InboxPage = memo(function InboxPage({
     // 之前漏了 tagFilters，loadList 一直闭包着最初的空数组，所以「按标签筛选」请求里
     // 根本没带标签条件（用户反馈"标签筛选无法正常运行"）。tagFilters 变化 → loadList 身份变化
     // → 上面依赖 loadList 的 effect 重新查列表。
-  }, [onToast, folderPath, labelFilter, view, tagFilters, unreadOnly, categoryId, settings.listPageSize])
+  }, [onToast, folderPath, labelFilter, tagFilters, unreadOnly, categoryId, settings.listPageSize])
 
   // doSync 通过 ref 取「当前视图」的 loadList / 文件夹 / 搜索词，
   // 避免旧闭包在同步完成后把过期的列表写回（曾导致切文件夹后列表被旧收件箱数据覆盖）
@@ -361,7 +351,7 @@ export const InboxPage = memo(function InboxPage({
   // 切换视图（文件夹 / 标签 / 星标 / 自定义视图）：立即切换到本地已有数据；
   // 首次进入该文件夹再后台同步一次（V2 M3/M4/M5）。
   // 初始挂载的 INBOX 已由上方"首次进入" effect 同步，这里跳过，避免双重并发同步
-  const viewKey = `${folderPath}|${(labelFilter?.labelIds ?? []).join(',')}|${labelFilter?.starredOnly ? 1 : 0}|${labelFilter?.flaggedOnly ? 1 : 0}|${view?.id ?? 0}`
+  const viewKey = `${folderPath}|${(labelFilter?.labelIds ?? []).join(',')}|${labelFilter?.starredOnly ? 1 : 0}|${labelFilter?.flaggedOnly ? 1 : 0}`
   // V2.2 修复：标签筛选也要参与「要不要重新加载」的判断。
   // 之前只比对 viewKey，改标签筛选后 effect 提前 return，列表根本没重新查（用户反馈"标签筛选没用"）。
   const filterKey = `${viewKey}|${tagFilters.join(',')}|${unreadOnly ? 1 : 0}|${categoryId ?? ''}`
@@ -462,28 +452,6 @@ export const InboxPage = memo(function InboxPage({
     [settings.openMailMarksRead]
   )
 
-  // V2 M5：把当前视图状态（搜索词 / 未读 / 标签）保存为命名视图
-  const doSaveView = useCallback(async () => {
-    const name = viewName.trim()
-    if (!name) return
-    setSavingView(true)
-    try {
-      const filter: ViewFilter = {
-        ...(searchTerm.trim() ? { text: searchTerm.trim() } : {}),
-        ...(unreadOnly ? { unread: true } : {}),
-        ...(labelFilter?.labelIds && labelFilter.labelIds.length > 0 ? { labelIds: [...labelFilter.labelIds] } : {})
-      }
-      await api.saveView({ id: view?.id, name, filter, sort: { by: 'date', dir: 'desc' } })
-      setSaveViewOpen(false)
-      setViewName('')
-      onToast(view ? '视图已更新' : '视图已保存')
-      onViewsChanged?.()
-    } catch (e) {
-      onToast(errorMessage(e))
-    } finally {
-      setSavingView(false)
-    }
-  }, [viewName, searchTerm, unreadOnly, labelFilter, view, onToast, onViewsChanged])
 
   // ---- V2 M7：批量选择 / 批量操作 ----
 
@@ -761,7 +729,6 @@ export const InboxPage = memo(function InboxPage({
         case 'close':
           exitSelectionMode()
           setCtxMenu(null)
-          setSaveViewOpen(false)
           break
         default:
           break
@@ -790,25 +757,22 @@ export const InboxPage = memo(function InboxPage({
     <div className="inbox-wrap">
       <header className="topbar">
         <div className="title">
-          {view
-            ? `🗂 ${view.name}`
-            : labelFilter?.starredOnly
-              ? '★ 星标邮件'
-              : labelFilter?.flaggedOnly
-                ? '🚩 红旗邮件'
-                : categoryId !== null && categoryId !== undefined
-                  ? '🎨 类别'
-              : labelFilter?.labelIds?.length
-                ? `🏷 ${filterTitle ?? '标签'}`
-                : folderPath === 'INBOX'
-                  ? '收件箱'
-                  : `📁 ${folderPath}`}{' '}
+          {labelFilter?.starredOnly
+            ? '★ 星标邮件'
+            : labelFilter?.flaggedOnly
+              ? '🚩 红旗邮件'
+              : categoryId !== null && categoryId !== undefined
+                ? '🎨 类别'
+                : labelFilter?.labelIds?.length
+                  ? `🏷 ${filterTitle ?? '标签'}`
+                  : folderPath === 'INBOX'
+                    ? '收件箱'
+                    : `📁 ${folderPath}`}{' '}
           <span className="sub" data-testid="mail-total">
             {unreadCount > 0 ? `${unreadCount} 封未读` : `共 ${totalCount || mails.length} 封`}
           </span>
         </div>
-        {!view && (
-          <div className="searchbox">
+        <div className="searchbox">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="7" />
               <path d="M16 16l4 4" />
@@ -820,8 +784,7 @@ export const InboxPage = memo(function InboxPage({
               placeholder="搜索邮件…（主题/正文/发件人）"
               data-testid="search-input"
             />
-          </div>
-        )}
+        </div>
         {/* V2.2：标签筛选入口就放在搜索框旁边（用户反馈原来孤零零一行太占地方） */}
         <div className="topbar-tags" data-testid="tag-filter-bar">
           <button
@@ -845,16 +808,6 @@ export const InboxPage = memo(function InboxPage({
             </button>
           )}
         </div>
-        <button
-          className="btn ghost"
-          onClick={() => {
-            setViewName(view?.name ?? '')
-            setSaveViewOpen((v) => !v)
-          }}
-          data-testid="save-view-btn"
-        >
-          💾 {view ? '更新视图' : '保存为视图'}
-        </button>
         <button className="btn primary" onClick={() => void doSync()} data-testid="sync-btn">
           ↻ 同步
         </button>
@@ -865,26 +818,6 @@ export const InboxPage = memo(function InboxPage({
 
       {/* 批量总结进度：显示「正在生成哪一封 + 已用 + 停止」 */}
       <SummaryProgressBar />
-      {saveViewOpen && (
-        <div className="save-view-bar" data-testid="save-view-bar">
-          <input
-            value={viewName}
-            onChange={(e) => setViewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void doSaveView()
-            }}
-            placeholder="视图名称（保存当前筛选与排序）"
-            maxLength={50}
-            data-testid="view-name-input"
-          />
-          <button className="btn primary sm" onClick={() => void doSaveView()} disabled={savingView || !viewName.trim()} data-testid="view-save-confirm">
-            {view ? '更新' : '保存'}
-          </button>
-          <button className="btn ghost sm" onClick={() => setSaveViewOpen(false)} data-testid="view-save-cancel">
-            取消
-          </button>
-        </div>
-      )}
 
       <div className="workspace">
         <section className="list-pane">

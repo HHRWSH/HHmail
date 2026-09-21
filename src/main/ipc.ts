@@ -30,6 +30,7 @@ import {
   categoryIdSchema,
   setMailCategorySchema,
   tagExampleSchema,
+  clearManualTagsSchema,
   tagManualSchema,
   openPathSchema,
   getMailSchema,
@@ -466,30 +467,6 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     })
   )
 
-  // ---- V2 M5：自定义视图 ----
-
-  ipcMain.handle(
-    IPC_CHANNELS.VIEWS_LIST,
-    wrap(ctx, null, async () => ctx.store.listViews())
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.VIEWS_SAVE,
-    wrap(ctx, saveViewSchema, async (args: SaveViewArgs) => {
-      const view = await ctx.store.saveView({ id: args.id, name: args.name, filter: args.filter, sort: args.sort })
-      ctx.logger.info('view.saved', { viewId: view.id, viewName: view.name })
-      return view
-    })
-  )
-
-  ipcMain.handle(
-    IPC_CHANNELS.VIEWS_DELETE,
-    wrap(ctx, deleteViewSchema, async (args: DeleteViewArgs) => {
-      await ctx.store.deleteView(args.id)
-      ctx.logger.info('view.deleted', { viewId: args.id })
-    })
-  )
-
   // ---- V2 M6：稍后提醒 ----
 
   ipcMain.handle(
@@ -683,6 +660,14 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
   )
 
   /** 自动标签：用现有索引卡片重算全部规则标签（A 方案，不花 AI 成本） */
+  ipcMain.handle(
+    IPC_CHANNELS.TAGS_CLEAR_MANUAL,
+    wrap(ctx, clearManualTagsSchema, async (args: { id: number }) => {
+      await ctx.store.clearManualTags(args.id)
+      ctx.logger.info('tags.manual.cleared', { messageId: args.id })
+    })
+  )
+
   ipcMain.handle(
     IPC_CHANNELS.TAGS_REBUILD,
     wrap(ctx, null, async () => {

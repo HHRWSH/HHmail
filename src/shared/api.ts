@@ -82,6 +82,8 @@ export interface WindowApi {
   tagExamples(): Promise<import('./types').TagExample[]>
   /** 标签：手动给某封邮件加/去一个标签（手动标签不会被自动重算覆盖） */
   setMailTagManual(messageId: number, tag: string, on: boolean): Promise<void>
+  /** 恢复默认：清空这封邮件的手动标签（自动标签保留） */
+  clearManualTags(messageId: number): Promise<void>
   /** 自动标签：设置/取消某封邮件的示例标签（空数组 = 取消） */
   setTagExample(messageId: number, tags: string[]): Promise<void>
   /** 自动标签：用现有索引卡片重算全部规则标签（不花 AI 成本） */
@@ -178,11 +180,8 @@ export interface WindowApi {
   /** 星标开关（V2 M4） */
   toggleStar(id: number, starred: boolean): Promise<void>
   /** 已保存视图列表（V2 M5） */
-  listViews(): Promise<SavedView[]>
   /** 保存视图（带 id = 覆盖）；返回含 id 的完整视图（V2 M5） */
-  saveView(args: { id?: number; name: string; filter: ViewFilter; sort: ViewSort }): Promise<SavedView>
   /** 删除视图（V2 M5） */
-  deleteView(id: number): Promise<void>
   /** 设置稍后提醒（V2 M6；重复设置 = 覆盖未触发的提醒） */
   snoozeMail(id: number, until: number, note?: string): Promise<void>
   /** 取消未触发的稍后提醒（V2 M6） */

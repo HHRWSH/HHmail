@@ -14,6 +14,7 @@ import {
   DEFAULT_BRAND_NAME,
   DEFAULT_BRAND_SUBTITLE,
   DEFAULT_LIST_PAGE_SIZE,
+  DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_SUMMARY_PROMPT
 } from '@shared/defaults'
 import { DEFAULT_TAG_VOCABULARY, normalizeTag, parseVocabulary } from '@shared/tags'
@@ -84,6 +85,7 @@ export const SettingsPage = memo(function SettingsPage({
   const [brandName, setBrandName] = useState(DEFAULT_BRAND_NAME)
   const [brandSubtitle, setBrandSubtitle] = useState(DEFAULT_BRAND_SUBTITLE)
   const [listPageSize, setListPageSize] = useState(String(DEFAULT_LIST_PAGE_SIZE))
+  const [showRemoteImages, setShowRemoteImages] = useState(DEFAULT_SHOW_REMOTE_IMAGES)
   const [relativeTime, setRelativeTime] = useState(true)
   const [openMailMarksRead, setOpenMailMarksRead] = useState(true)
   const [syncOnStartup, setSyncOnStartup] = useState(false)
@@ -193,6 +195,7 @@ export const SettingsPage = memo(function SettingsPage({
     setBrandName(s.brandName)
     setBrandSubtitle(s.brandSubtitle)
     setListPageSize(String(s.listPageSize))
+    setShowRemoteImages(s.showRemoteImages)
     setRelativeTime(s.relativeTime)
     setOpenMailMarksRead(s.openMailMarksRead)
     setSyncOnStartup(s.syncOnStartup)
@@ -271,6 +274,7 @@ export const SettingsPage = memo(function SettingsPage({
         brandName: brandName.trim() || DEFAULT_BRAND_NAME,
         brandSubtitle: brandSubtitle.trim(),
         listPageSize: Number.isFinite(size) && size >= 5 && size <= 200 ? size : DEFAULT_LIST_PAGE_SIZE,
+        showRemoteImages,
         relativeTime,
         openMailMarksRead,
         syncOnStartup,
@@ -314,8 +318,7 @@ export const SettingsPage = memo(function SettingsPage({
     summaryPrompt,
     syncOnStartup,
     syncWindow,
-    theme
-  ])
+    theme, showRemoteImages])
 
   const saveSmtp = useCallback(async () => {
     const port = Number.parseInt(smtpPort, 10)
@@ -768,6 +771,23 @@ export const SettingsPage = memo(function SettingsPage({
                 </label>
               </div>
               <div className="settings-row">
+                <span className="name">显示邮件图片</span>
+                <div className="row-inline">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={showRemoteImages}
+                      onChange={(e) => setShowRemoteImages(e.target.checked)}
+                      data-testid="show-remote-images"
+                    />
+                    <span>显示邮件里的图片（含远程图片）</span>
+                  </label>
+                  <span className="hint">
+                    关掉后只显示邮件自带的内嵌图片，远程图片会被拦截（防跟踪像素）；保存后立即生效
+                  </span>
+                </div>
+              </div>
+              <div className="settings-row">
                 <span className="name" />
                 <div className="row-inline">
                 <span className="name">标签词表</span>
@@ -804,14 +824,15 @@ export const SettingsPage = memo(function SettingsPage({
                   <button className="link-btn" onClick={() => setShowAllVocab((v) => !v)} data-testid="toggle-vocab">
                     {showAllVocab ? '收起' : `展开全部（${tagVocabList.length}）`}
                   </button>
-                  <button
-                    className="link-btn"
-                    onClick={() => setTagVocabList([...DEFAULT_TAG_VOCABULARY])}
-                    data-testid="reset-tag-vocab"
-                  >
-                    恢复默认
-                  </button>
                 </div>
+                <button
+                  className="btn ghost"
+                  onClick={() => setTagVocabList([...DEFAULT_TAG_VOCABULARY])}
+                  title="把标签词表还原成系统内置的默认词表（不影响已经给邮件手动打过的标签）"
+                  data-testid="reset-tag-vocab"
+                >
+                  ↺ 恢复默认词表
+                </button>
               </div>
               </div>
               <div className="settings-row">

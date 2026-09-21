@@ -24,9 +24,6 @@ export const IPC_CHANNELS = {
   LABELS_DELETE: 'labels:delete',
   MAIL_SET_LABELS: 'mail:set-labels',
   MAIL_TOGGLE_STAR: 'mail:toggle-star',
-  VIEWS_LIST: 'views:list',
-  VIEWS_SAVE: 'views:save',
-  VIEWS_DELETE: 'views:delete',
   MAIL_SNOOZE: 'mail:snooze',
   MAIL_CANCEL_SNOOZE: 'mail:snooze:cancel',
   MAIL_BULK_READ: 'mail:bulk-read',
@@ -83,6 +80,8 @@ export const IPC_CHANNELS = {
   TAGS_EXAMPLE_SET: 'tags:example-set',
   /** 手动给某封邮件加/去标签（永不被自动重算覆盖） */
   TAGS_SET_MANUAL: 'tags:set-manual',
+  /** 清空某封邮件的手动标签（恢复默认） */
+  TAGS_CLEAR_MANUAL: 'tags:clear-manual',
   TAGS_REBUILD: 'tags:rebuild',
   /** 附件保存（V2.2：主进程决定落盘位置并写文件；可配置固定目录） */
   MAIL_ATTACHMENT_SAVE: 'mail:attachment-save',

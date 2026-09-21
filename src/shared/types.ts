@@ -338,6 +338,8 @@ export interface AppSettings {
   brandSubtitle: string
   /** 列表一次加载多少封 */
   listPageSize: number
+  /** 显示邮件图片（含远程；默认开）。关掉只保留内嵌 data:/cid: 图片，防跟踪像素 */
+  showRemoteImages: boolean
   /** 时间显示：相对时间（3 分钟前）还是绝对时间 */
   relativeTime: boolean
   // —— 行为（V2.2 通用化）——
@@ -407,6 +409,7 @@ export interface SetSettingsArgs {
   brandSubtitle?: string
   /** 列表一次加载多少封（5-200） */
   listPageSize?: number
+  showRemoteImages?: boolean
   /** 时间显示：相对 / 绝对 */
   relativeTime?: boolean
   /** 打开邮件时本地标记已读 */
