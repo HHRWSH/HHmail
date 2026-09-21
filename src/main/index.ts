@@ -11,6 +11,7 @@ import { FileLogger } from './logger'
 import { registerIpcHandlers, summarizePendingBatch } from './ipc'
 import { repairNoisyBodies } from './db/repair'
 import { createTray, type TrayController } from './tray'
+import { handleNewMails } from './ipc'
 import { startSnoozeScheduler, type SnoozeSchedulerHandle } from './mail/snoozeScheduler'
 import { createAutoSyncScheduler, type AutoSyncScheduler } from './mail/autoSync'
 import { IPC_CHANNELS } from '../shared/ipc-contract'
@@ -271,9 +272,21 @@ async function main(): Promise<void> {
    * 同步超过 2 分钟视为卡死 → 关连接让请求快速失败、下一次重连。
    */
   autoSync = createAutoSyncScheduler({
-    sync: (reason) => {
+    sync: async (reason) => {
       logger.info('sync.auto.run', { reason })
-      return ctx!.sync.run((p) => emitSync(p))
+      const result = await ctx!.sync.run((p) => emitSync(p))
+      // 后台同步发现新邮件时，必须和手动同步走同一套收尾：
+      // ① 推 NewMailEvent → 渲染层刷新列表（否则界面看起来「没有自动同步」）
+      // ② 弹 Windows 通知（后台到达正是通知该出现的时候）
+      // ③ 自动补摘要 + 索引卡片
+      const newUids = (result as { newUids?: number[] }).newUids?.slice(0, 10) ?? []
+      if (newUids.length > 0 && ctx) {
+        const settings = await ctx.settings.get()
+        void handleNewMails(ctx, newUids, settings, { notify: true, reason }).catch((e) =>
+          logger.warn('newmail.handle.failed', { reason: e instanceof Error ? e.message : String(e) })
+        )
+      }
+      return result
     },
     intervalSec: async () => (await ctx!.settings.get()).refreshIntervalSec,
     logger,

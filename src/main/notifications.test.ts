@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildNotificationBody, buildNotificationTitle, truncate } from './notifications'
+import { buildNotificationBody, buildNotificationTitle, shouldNotifyNewMail, truncate } from './notifications'
 import type { MailListItem } from '../shared/types'
 
 const item: MailListItem = {
@@ -60,5 +60,25 @@ describe('新邮件通知文案（纯函数）', () => {
     expect(truncate('a'.repeat(200), 50)).toHaveLength(51) // 50 + …
     expect(truncate('short', 50)).toBe('short')
     expect(truncate(null, 10)).toBe('')
+  })
+})
+
+describe('新邮件通知策略（真机反馈：自己点同步/摘要时不要弹窗）', () => {
+  it('用户主动触发 → 不弹通知', () => {
+    expect(shouldNotifyNewMail('manual')).toBe(false)
+    expect(shouldNotifyNewMail('manual-sync')).toBe(false)
+    expect(shouldNotifyNewMail('manual-summarize')).toBe(false)
+    expect(shouldNotifyNewMail('manual-anything')).toBe(false)
+  })
+
+  it('后台自动同步 → 弹通知', () => {
+    for (const reason of ['interval', 'resume', 'unlock-screen', 'focus', 'idle', 'startup']) {
+      expect(shouldNotifyNewMail(reason)).toBe(true)
+    }
+  })
+
+  it('没说来源时默认弹（宁可多提醒，不要漏掉新邮件）', () => {
+    expect(shouldNotifyNewMail(undefined)).toBe(true)
+    expect(shouldNotifyNewMail('')).toBe(true)
   })
 })

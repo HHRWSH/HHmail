@@ -140,6 +140,47 @@ try {
   await page.click('[data-nav="inbox"]');
   await page.waitForSelector(".mail-list .mail-item", { timeout: 8000 });
 
+  // ---------- 加载更多（真机回归：点了会跳回顶部 / 加载不出更早的邮件） ----------
+  // 用 ?count=120 让 mock 生成足够多的邮件，才能触发「加载更多」。
+  await page.goto(`${BASE}/index.html?count=120`, { waitUntil: "load" });
+  await page.waitForTimeout(400);
+  // 重新加载后 mock 会回到登录页 → 先登录再等列表
+  await page.click('button:has-text("开始登录")').catch(() => {});
+  await page.waitForSelector(".mail-list .mail-item", { timeout: 15000 });
+  await page.waitForTimeout(600);
+  const lmRowsBefore = await page.locator(".mail-list .mail-item").count();
+  const lmTopIdBefore = await page.$eval(".mail-list .mail-item", (el) => el.getAttribute("data-mail-id"));
+  // 滚到列表底部（并记录位置），再用脚本点击按钮 —— 避免 Playwright 自动滚动干扰断言
+  await page.evaluate(() => {
+    const box = document.querySelector(".mail-list");
+    if (box) box.scrollTop = box.scrollHeight - box.clientHeight - 80;
+  });
+  await page.waitForTimeout(400);
+  const lmScrollBefore = await page.evaluate(() => document.querySelector(".mail-list")?.scrollTop ?? 0);
+  await page.evaluate(() => document.querySelector('[data-testid="load-more"]')?.click());
+  await page.waitForTimeout(900);
+  const lmRowsAfter = await page.locator(".mail-list .mail-item").count();
+  const lmScrollAfter = await page.evaluate(() => document.querySelector(".mail-list")?.scrollTop ?? 0);
+  const lmTopIdAfter = await page.$eval(".mail-list .mail-item", (el) => el.getAttribute("data-mail-id"));
+  check("「加载更多」渲染出更多邮件", lmRowsAfter > lmRowsBefore, `${lmRowsBefore} → ${lmRowsAfter}`);
+  check("「加载更多」后没有跳回顶部", lmScrollAfter > 0 && lmScrollAfter >= lmScrollBefore * 0.5, `scrollTop ${Math.round(lmScrollBefore)} → ${Math.round(lmScrollAfter)}`);
+  check("「加载更多」后列表顶部的邮件不变", lmTopIdAfter === lmTopIdBefore, `${lmTopIdBefore} → ${lmTopIdAfter}`);
+  // 渐进式渲染一次只多画 40 行，所以再点一次并等哨兵加载，验证「能继续往回翻」
+  await page.evaluate(() => document.querySelector('[data-testid="load-more"]')?.click());
+  await page.evaluate(() => {
+    const box = document.querySelector(".mail-list");
+    if (box) box.scrollTop = box.scrollHeight;
+  });
+  await page.waitForTimeout(900);
+  const lmRowsThird = await page.locator(".mail-list .mail-item").count();
+  check("连续加载能继续往回翻更早的邮件", lmRowsThird > lmRowsAfter, `${lmRowsAfter} → ${lmRowsThird}`);
+  // 恢复默认数据集（后面还有依赖「20 封」的断言：搜索结果数、未读数等）
+  await page.goto(`${BASE}/index.html`, { waitUntil: "load" });
+  await page.waitForTimeout(400);
+  await page.click('button:has-text("开始登录")').catch(() => {});
+  await page.waitForSelector(".mail-list .mail-item", { timeout: 15000 });
+  await page.waitForTimeout(600);
+
   // V2.2 修复：角标显示真实总数（列表只取前 N 封，之前会一直显示"共 200 封"）
   const totalText = await page.$eval('[data-testid="mail-total"]', (el) => el.textContent || "").catch(() => "");
   check("顶栏显示邮件总数", /共 \d+ 封|\d+ 封未读/.test(totalText), totalText.trim());
@@ -251,17 +292,8 @@ try {
   await page.click('[data-nav="category:1"]');
   await page.waitForTimeout(700);
 
-  // V2.2：点「加载更多」不会跳回顶部
-  await page.evaluate(() => {
-    const el = document.querySelector('.mail-list')
-    if (el) el.scrollTop = 400
-  })
-  await page.waitForTimeout(300)
-  const scrollBefore = await page.evaluate(() => document.querySelector('.mail-list')?.scrollTop ?? 0)
-  await page.click('[data-testid="load-more"]').catch(() => {})
-  await page.waitForTimeout(900)
-  const scrollAfter = await page.evaluate(() => document.querySelector('.mail-list')?.scrollTop ?? 0)
-  check("点「加载更多」后滚动位置不跳回顶部", Math.abs(scrollAfter - scrollBefore) < 220, `${scrollBefore} → ${scrollAfter}`);
+  // 注：点「加载更多」不跳顶部的回归断言见前面「加载更多」小节
+  // （那里用「程序化点击」避免 Playwright 自动 scrollIntoView 干扰滚动位置断言）
 
   const attach = await page.$eval(".attach-card", (el) => {
     const name = el.querySelector(".name");

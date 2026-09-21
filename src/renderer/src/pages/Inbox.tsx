@@ -102,6 +102,7 @@ const MailRow = memo(function MailRow({
         onContextMenu(e.clientX, e.clientY, m.id)
       }}
       data-testid="mail-item"
+      data-mail-id={m.id}
     >
       {selectionMode && (
         <input
@@ -230,6 +231,8 @@ export const InboxPage = memo(function InboxPage({
   // V2 M7：快捷键 l → 打开详情页标签面板的信号
   const [labelsSignal, setLabelsSignal] = useState(0)
   const syncedOnce = useRef(false)
+  /** 「加载更多」触发的重新拉取：此时不要重置已展开的行数（否则列表缩回去 → 滚动位置被夹回顶部） */
+  const appendRef = useRef(false)
   /** 单次拉取上限（V2.2 性能：默认 200 封，点「加载更多」时翻倍） */
   const fetchLimitRef = useRef(200)
   const syncedFolders = useRef(new Set<string>())
@@ -290,7 +293,9 @@ export const InboxPage = memo(function InboxPage({
         })
         .then((n) => setTotalCount(typeof n === 'number' && n > 0 ? n : items.length))
         .catch(() => setTotalCount(items.length))
-      setShownCount(settings.listPageSize)
+      // 只有在「换筛选/换文件夹/刷新」时才回到第一屏；「加载更多」触发的重新拉取必须保留已展开行数
+      if (!appendRef.current) setShownCount(settings.listPageSize)
+      appendRef.current = false
       setSelectedId((prev) => {
         if (prev && items.some((m) => m.id === prev)) return prev
         return items[0]?.id ?? null
@@ -1049,8 +1054,15 @@ export const InboxPage = memo(function InboxPage({
                       onClick={() => {
                         // 先看本地还有没有：没有就把服务端拉取上限翻倍再取一次
                         if (shownCount + 100 > visible.length && fetchLimitRef.current < 2000) {
+                          // 先把「这是追加」告诉 loadList，再让它去服务端多取一批
+                          appendRef.current = true
                           fetchLimitRef.current = Math.min(fetchLimitRef.current * 2, 2000)
-                          void loadListRef.current(searchTermRef.current)
+                          const box = mailListRef.current
+                          const keepScroll = box ? box.scrollTop : 0
+                          void loadListRef.current(searchTermRef.current).then(() => {
+                            // 双保险：万一浏览器仍夹了滚动位置，恢复到点击前的位置（新邮件追加在下方，不打断阅读）
+                            if (box) box.scrollTop = keepScroll
+                          })
                         }
                         setShownCount((c) => c + 100)
                       }}

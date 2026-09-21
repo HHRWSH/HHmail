@@ -49,3 +49,28 @@ export function buildNotificationBody(item: MailListItem, summary: string | null
 export function truncate(text: string | null | undefined, max: number): string {
   return truncateSafe(String(text ?? ''), max)
 }
+
+/**
+ * 新邮件要不要弹 Windows 通知？（真机反馈：用户自己点「同步」时不想被打扰）
+ *
+ * 规则：
+ * - 用户**主动**触发的（手动点同步、手动生成摘要后的顺带同步）→ 不弹；
+ * - **后台**自动同步发现的（定时、唤醒、解锁、窗口重新聚焦、IDLE 推送）→ 弹。
+ * 无论弹不弹，都会推 `mail:new` 事件让界面刷新列表 —— 所以「不弹通知」不等于「界面不更新」。
+ */
+export type SyncNotifyReason =
+  | 'manual'
+  | 'manual-sync'
+  | 'manual-summarize'
+  | 'interval'
+  | 'resume'
+  | 'unlock-screen'
+  | 'focus'
+  | 'idle'
+  | 'startup'
+
+export function shouldNotifyNewMail(reason: string | undefined): boolean {
+  if (!reason) return true
+  if (reason === 'manual' || reason.startsWith('manual')) return false
+  return true
+}

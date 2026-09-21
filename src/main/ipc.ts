@@ -65,7 +65,7 @@ import { deriveRuleTags, parseAiTags, parseVocabulary } from '../shared/tags'
 import { describeProbeResult, probeSmtpAuth } from './mail/smtpProbe'
 import { describeSendResult, sendSmtpMail, type SmtpSendResult } from './mail/smtpSend'
 import { SMTP_HOST, SMTP_PORT } from './config'
-import { buildNotificationBody, buildNotificationTitle } from './notifications'
+import { shouldNotifyNewMail, buildNotificationBody, buildNotificationTitle } from './notifications'
 
 function sendToAllWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -192,7 +192,23 @@ async function buildIndexCardFor(ctx: AppContext, id: number, threadId: string):
   }
 }
 
-async function handleNewMails(ctx: AppContext, newUids: number[], settings: AppSettings): Promise<void> {
+/**
+ * 新邮件到达的统一处理：自动摘要（可选）→ Windows 通知（可选）→ 通知渲染层刷新列表。
+ *
+ * 为什么要 `notify` 开关（真机反馈）：
+ * - **后台自动同步**发现新邮件 → 应该弹通知（用户没在看应用）；
+ * - **用户自己点「↻ 同步」** → 不发通知（他就在屏幕前，通知是打扰）；
+ * - 用户手动触发的同步再顺带总结，也不该弹窗。
+ * 另外：以前只有 IPC 手动同步这条路会走这里，后台自动同步根本不通知渲染层 →
+ * 界面上的列表一直不刷新，用户以为「没有自动同步」。
+ */
+export async function handleNewMails(
+  ctx: AppContext,
+  newUids: number[],
+  settings: AppSettings,
+  opts: { notify?: boolean; reason?: string } = {}
+): Promise<void> {
+  const notify = opts.notify ?? shouldNotifyNewMail(opts.reason)
   const all = await ctx.store.query({ limit: 1000, offset: 0 })
   for (const uid of newUids) {
     const item = all.find((m) => m.uid === uid)
@@ -1030,7 +1046,8 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
       // 新邮件：自动 AI 总结 + Windows 通知（全量首同步不打扰，只处理增量新 UID）
       const newUids = result.newUids.slice(0, 10)
       if (newUids.length > 0) {
-        void handleNewMails(ctx, newUids, settings).catch((e) =>
+        // 用户手动点同步：不发 Windows 通知（真机反馈），但仍然推事件让列表刷新 + 自动总结
+        void handleNewMails(ctx, newUids, settings, { notify: false, reason: 'manual-sync' }).catch((e) =>
           ctx.logger.warn('newmail.handle.failed', { reason: e instanceof Error ? e.message : String(e) })
         )
       }
