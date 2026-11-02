@@ -1149,7 +1149,7 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
 /** 去掉文件名里的非法字符（Windows 限制），并限制长度。 */
 function sanitizeFilename(name: string): string {
   const cleaned = String(name ?? '')
-    .replace(/[\/:*?"<>| -]/g, '_')
+    .replace(/[\/:*?"<>|\u0000-\u001f]/g, '_')
     .replace(/^\s+|\s+$/g, '')
     .slice(0, 120)
   return cleaned || 'attachment'
