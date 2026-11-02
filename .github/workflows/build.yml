@@ -201,17 +201,36 @@ jobs:
           echo '--- SHA256SUMS.txt ---'
           cat SHA256SUMS.txt || true
 
+      - name: 取版本号
+        id: ver
+        shell: bash
+        run: node -p "require('./program/package.json').version" | xargs -I{} echo "v={}" >> "$GITHUB_OUTPUT"
+
       - name: 附上使用说明
         shell: bash
         run: |
+          V="${{ steps.ver.outputs.v }}"
           # 用 ASCII 文件名（中文名上传到 Release 时会被截断成 "HHmail-1.0.0-.txt"）
-          cp docs/使用说明-v1.1.0.txt artifacts/HHmail-1.1.0-usage-zh.txt || true
-          cp docs/mac-下载与安装.md artifacts/HHmail-1.1.0-macos-guide-zh.md || true
+          cp "docs/使用说明-v$V.txt" "artifacts/HHmail-$V-usage-zh.txt" || true
+          cp docs/mac-下载与安装.md "artifacts/HHmail-$V-macos-guide-zh.md" || true
           ls -lh artifacts | head -20
+
+      - name: 准备发布说明
+        shell: bash
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          if [ -f "docs/RELEASE-NOTES-v$V.md" ]; then
+            cp "docs/RELEASE-NOTES-v$V.md" release-notes.md
+          else
+            echo "HHmail $V" > release-notes.md
+            echo "" >> release-notes.md
+            echo "详见仓库 README。" >> release-notes.md
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
-          draft: true
-          name: 'HHmail 1.1.0'
-          body_path: docs/RELEASE-NOTES-v1.1.0.md
+          # 直接发布（不再默认草稿）：tag 推送即发版，发完可在 GitHub 上改说明
+          draft: false
+          name: 'HHmail ${{ steps.ver.outputs.v }}'
+          body_path: release-notes.md
           files: artifacts/**/*
