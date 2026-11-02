@@ -1,6 +1,6 @@
 {
   "name": "hhmail",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "description": "HHmail — 本地优先的学校邮箱 AI 助手：只读 IMAP + AI 摘要/问答 + 自动标签与彩色类别",
   "author": "HHmail",
