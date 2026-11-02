@@ -302,8 +302,9 @@ export class SqliteMessageStore implements MessageStore {
     // 正文单独进 message_bodies，按需读取；messages 只留小字段 + snippet。
     const insertMsg = this.db.prepare(`
       INSERT INTO messages (account_id, uid, message_id, thread_id, subject, from_name, from_addr,
-        to_addrs, cc_addrs, date_hdr, date_ts, snippet, is_read, flags_json, created_at, folder)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        to_addrs, cc_addrs, date_hdr, date_ts, snippet, is_read, flags_json, created_at, folder,
+        list_unsubscribe, list_unsubscribe_post)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
         message_id=excluded.message_id, thread_id=excluded.thread_id, subject=excluded.subject,
         from_name=excluded.from_name, from_addr=excluded.from_addr, to_addrs=excluded.to_addrs,
@@ -357,7 +358,9 @@ export class SqliteMessageStore implements MessageStore {
           0,
           JSON.stringify(m.flags),
           now,
-          folder
+          folder,
+          m.listUnsubscribe ?? null,
+          m.listUnsubscribePost ?? null
         )
         const rowId = prev ? prev.id : Number(info.lastInsertRowid)
         upsertBody.run(rowId, m.bodyText, m.bodyHtml)
@@ -522,7 +525,10 @@ export class SqliteMessageStore implements MessageStore {
           m.id, m.uid, m.thread_id, m.subject, m.from_name, m.from_addr, m.date_ts, m.snippet,
           m.is_read, m.starred, m.flagged, m.folder,
           (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) AS has_attachments,
-          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until
+          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until,
+          (SELECT status FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_status,
+          (SELECT detail FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_detail,
+          (SELECT created_at FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_at
          FROM messages m
          WHERE ${where}
          ORDER BY ${orderBy}
@@ -631,7 +637,10 @@ export class SqliteMessageStore implements MessageStore {
       .prepare(
         `SELECT m.*, b.body_text, b.body_html,
           (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) AS has_attachments,
-          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until
+          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until,
+          (SELECT status FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_status,
+          (SELECT detail FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_detail,
+          (SELECT created_at FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_at
          FROM messages m LEFT JOIN message_bodies b ON b.message_id = m.id
          WHERE m.id = ?`
       )
@@ -661,7 +670,18 @@ export class SqliteMessageStore implements MessageStore {
       })),
       savedSummary: summary?.summary_text ?? null,
       savedSummaryModel: summary?.model ?? null,
-      savedSummaryAt: summary?.created_at ?? null
+      savedSummaryAt: summary?.created_at ?? null,
+      listUnsubscribe: (row as unknown as { list_unsubscribe?: string | null }).list_unsubscribe ?? null,
+      listUnsubscribePost: (row as unknown as { list_unsubscribe_post?: string | null }).list_unsubscribe_post ?? null,
+      unsubscribe:
+        (row as unknown as { unsub_status?: string | null }).unsub_status === 'done' ||
+        (row as unknown as { unsub_status?: string | null }).unsub_status === 'failed'
+          ? {
+              status: (row as unknown as { unsub_status: 'done' | 'failed' }).unsub_status,
+              detail: (row as unknown as { unsub_detail?: string | null }).unsub_detail ?? null,
+              at: (row as unknown as { unsub_at?: number | null }).unsub_at ?? 0
+            }
+          : null
     }
   }
 
@@ -728,7 +748,10 @@ export class SqliteMessageStore implements MessageStore {
       .prepare(
         `SELECT m.*, b.body_text, b.body_html,
           (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) AS has_attachments,
-          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until
+          (SELECT snooze_until FROM snoozes s WHERE s.message_id = m.id AND s.notified_at IS NULL) AS snooze_until,
+          (SELECT status FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_status,
+          (SELECT detail FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_detail,
+          (SELECT created_at FROM unsubscribe_state u WHERE u.message_id = m.id) AS unsub_at
          FROM messages m LEFT JOIN message_bodies b ON b.message_id = m.id
          LEFT JOIN mail_summaries s ON s.message_id = m.id
          LEFT JOIN mail_index_docs d ON d.message_id = m.id
@@ -1699,6 +1722,15 @@ export class SqliteMessageStore implements MessageStore {
       status: r.status === 'failed' ? 'failed' : 'sent',
       error: r.error
     }))
+  }
+
+  async setUnsubscribeState(messageId: number, status: 'done' | 'failed', detail?: string | null): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO unsubscribe_state (message_id, status, detail, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(message_id) DO UPDATE SET status=excluded.status, detail=excluded.detail, created_at=excluded.created_at`
+      )
+      .run(messageId, status, detail ?? null, Date.now())
   }
 
   async deleteSentItem(id: number): Promise<void> {

@@ -78,6 +78,8 @@ export interface WindowApi {
   }): Promise<number>
   /** 日历：取某时间范围内的事件（截止 + 卡片里提到的日期） */
   listEvents(args: { from: number; to: number }): Promise<CalendarEvent[]>
+  /** 一键退订（V2.3）：按邮件头发起退订；返回本地记录的结果 */
+  unsubscribe(messageId: number): Promise<{ ok: boolean; kind: string; detail: string }>
   /** 待办（V2.3）：全部任务（含关联邮件主题/发件人） */
   listTasks(): Promise<TaskItem[]>
   /** 待办：手动新增 */

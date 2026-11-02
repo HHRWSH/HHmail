@@ -252,7 +252,10 @@ export class InMemoryMessageStore implements MessageStore {
       })),
       savedSummary: summary?.text ?? null,
       savedSummaryModel: summary?.model ?? null,
-      savedSummaryAt: summary?.createdAtMs ?? null
+      savedSummaryAt: summary?.createdAtMs ?? null,
+      listUnsubscribe: null,
+      listUnsubscribePost: null,
+      unsubscribe: null
     }
   }
 
@@ -709,6 +712,12 @@ ${m.fromAddr}`.toLowerCase()
       }
     }
     return out.sort((a, b) => (a.dueTs ?? 0) - (b.dueTs ?? 0))
+  }
+
+  private unsubStates = new Map<number, 'done' | 'failed'>()
+
+  async setUnsubscribeState(messageId: number, status: 'done' | 'failed'): Promise<void> {
+    this.unsubStates.set(messageId, status)
   }
 
   async idsByUids(uids: number[]): Promise<number[]> {

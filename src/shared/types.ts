@@ -305,6 +305,11 @@ export interface MailDetail extends MailListItem {
   savedSummary: string | null
   savedSummaryModel: string | null
   savedSummaryAt: number | null
+  /** 一键退订头（V2.3）：List-Unsubscribe / -Post 原文；null = 不支持退订 */
+  listUnsubscribe: string | null
+  listUnsubscribePost: string | null
+  /** 本地退订状态（只在本地记录，不改服务端邮件） */
+  unsubscribe: { status: 'done' | 'failed'; detail: string | null; at: number } | null
 }
 
 /** 主题：跟随系统 / 浅色 / 深色 */

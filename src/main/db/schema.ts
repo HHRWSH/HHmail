@@ -462,6 +462,21 @@ export const SCHEMA_MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_ts)`,
       `CREATE INDEX IF NOT EXISTS idx_tasks_message ON tasks(message_id)`
     ]
+  },
+  {
+    version: 21,
+    name: 'list-unsubscribe',
+    sql: [
+      // 一键退订（V2.3）：同步时保存 List-Unsubscribe / -Post 头；退订结果只记本地状态，不改服务端邮件。
+      `ALTER TABLE messages ADD COLUMN list_unsubscribe TEXT`,
+      `ALTER TABLE messages ADD COLUMN list_unsubscribe_post TEXT`,
+      `CREATE TABLE IF NOT EXISTS unsubscribe_state (
+        message_id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        detail TEXT,
+        created_at INTEGER NOT NULL
+      )`
+    ]
   }
 ] as const
 

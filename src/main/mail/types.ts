@@ -29,6 +29,10 @@ export interface ParsedMessage {
   snippet: string
   attachments: ParsedAttachmentMeta[]
   flags: string[]
+  /** 一键退订头（V2.3）：原样保存，主进程按规则解析；缺失为 null */
+  listUnsubscribe?: string | null
+  /** RFC 8058：`List-Unsubscribe=One-Click` 时可用一键 POST 退订 */
+  listUnsubscribePost?: string | null
 }
 
 export const SNIPPET_MAX = 200

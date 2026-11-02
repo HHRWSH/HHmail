@@ -74,6 +74,8 @@ export const IPC_CHANNELS = {
   MAIL_COUNT: 'mail:count',
   /** 日历：某时间范围内的事件（截止 + 卡片里提到的日期） */
   MAIL_LIST_EVENTS: 'mail:list-events',
+  /** 一键退订（V2.3）：按 List-Unsubscribe 头发起退订（https 一键 / https 打开浏览器 / mailto 发信） */
+  MAIL_UNSUBSCRIBE: 'mail:unsubscribe',
   /** 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 */
   TASKS_LIST: 'tasks:list',
   TASKS_CREATE: 'tasks:create',

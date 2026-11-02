@@ -28,6 +28,7 @@ import {
   pickDirectorySchema,
   countMailsSchema,
   listEventsSchema,
+  unsubscribeSchema,
   taskCreateSchema,
   taskUpdateSchema,
   taskIdSchema,
@@ -77,6 +78,7 @@ import { describeSendResult, sendSmtpMail, type SmtpSendResult } from './mail/sm
 import { SMTP_HOST, SMTP_PORT } from './config'
 import { shouldNotifyNewMail, buildNotificationBody, buildNotificationTitle } from './notifications'
 import { shouldShowSystemNotification } from '../shared/dnd'
+import { parseUnsubscribe, ONE_CLICK_BODY } from '../shared/unsubscribe'
 
 function sendToAllWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -961,6 +963,92 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
       })
       const conclusion = describeSendResult(result, recipients.join(', '), { oauth: true })
       return { ...result, conclusion, sentId }
+    })
+  )
+
+  /**
+   * 一键退订（V2.3）。安全约束：
+   * - 地址**只能**来自邮件头（List-Unsubscribe），渲染层不能传 URL（防 SSRF/钓鱼）；
+   * - 只允许 https 与 mailto（shared/unsubscribe.isAllowedUnsubscribeTarget 已校验）；
+   * - 必须由用户二次确认后才会调用这个 IPC；本地只记录结果，不改服务端邮件。
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_UNSUBSCRIBE,
+    wrap(ctx, unsubscribeSchema, async (args: { id: number }) => {
+      const mail = await ctx.store.getMessage(args.id)
+      if (!mail) throw new AppError(ErrorCodes.UNKNOWN, '邮件不存在或已被移除。')
+      const info = parseUnsubscribe({
+        listUnsubscribe: mail.listUnsubscribe,
+        listUnsubscribePost: mail.listUnsubscribePost
+      })
+      if (info.kind === 'none') {
+        throw new AppError(ErrorCodes.VALIDATION_FAILED, info.reason ?? '这封邮件不支持退订。')
+      }
+      const record = async (status: 'done' | 'failed', detail: string): Promise<void> => {
+        await ctx.store.setUnsubscribeState(args.id, status, detail.slice(0, 300))
+        ctx.logger.info('unsubscribe.state', { messageId: args.id, status, kind: info.kind })
+      }
+
+      if (info.kind === 'one-click' && info.url) {
+        if (ctx.mockMode) {
+          await record('done', 'mock: one-click')
+          return { ok: true, kind: 'one-click', detail: '已发送一键退订请求（mock）' }
+        }
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 15_000)
+        try {
+          const res = await fetch(info.url, {
+            method: 'POST',
+            body: ONE_CLICK_BODY,
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            signal: controller.signal,
+            redirect: 'follow'
+          })
+          if (!res.ok) {
+            await record('failed', `HTTP ${res.status}`)
+            throw new AppError(ErrorCodes.UNKNOWN, `退订请求被拒绝（HTTP ${res.status}）。`)
+          }
+          await record('done', `one-click HTTP ${res.status}`)
+          return { ok: true, kind: 'one-click', detail: '已发送一键退订请求' }
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : String(e)
+          await record('failed', reason)
+          if (e instanceof AppError) throw e
+          throw new AppError(ErrorCodes.UNKNOWN, `退订请求失败：${reason}`)
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+
+      if (info.kind === 'https-get' && info.url) {
+        // 打开浏览器：用户自己看到发件方页面，最后一步由用户确认，最安全
+        await shell.openExternal(info.url)
+        await record('done', 'opened-browser')
+        return { ok: true, kind: 'https-get', detail: '已在浏览器打开退订页面' }
+      }
+
+      // mailto：用现有 SMTP 配置发一封退订邮件
+      const { user, accessToken } = await ctx.auth.ensureValidToken()
+      const result = ctx.mockMode
+        ? ({ ok: true, stage: 'done', serverMessage: 'mock' } as SmtpSendResult)
+        : await sendSmtpMail({
+            host: SMTP_HOST,
+            port: SMTP_PORT,
+            secure: false,
+            user,
+            accessToken,
+            from: user,
+            to: info.mailto!.to,
+            subject: info.mailto!.subject ?? 'unsubscribe',
+            text: info.mailto!.body ?? 'unsubscribe',
+            timeoutMs: 30_000
+          })
+      if (!result.ok) {
+        await record('failed', `${result.stage}: ${result.serverMessage}`)
+        throw new AppError(ErrorCodes.UNKNOWN, `退订邮件发送失败：${result.serverMessage}`)
+      }
+      await record('done', `mailto ${info.mailto!.to}`)
+      return { ok: true, kind: 'mailto', detail: '已发送退订邮件' }
     })
   )
 

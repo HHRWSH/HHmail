@@ -99,6 +99,9 @@ const api: WindowApi = {
   /** 日历：取某时间范围内的事件（截止 + 卡片里的日期） */
   listEvents: (args: { from: number; to: number }): Promise<import('../shared/calendar').CalendarEvent[]> =>
     invoke(IPC_CHANNELS.MAIL_LIST_EVENTS, args),
+  /** 一键退订（V2.3） */
+  unsubscribe: (id: number): Promise<{ ok: boolean; kind: string; detail: string }> =>
+    invoke(IPC_CHANNELS.MAIL_UNSUBSCRIBE, { id }),
   /** 待办（V2.3） */
   listTasks: (): Promise<import('../shared/tasks').TaskItem[]> => invoke(IPC_CHANNELS.TASKS_LIST, {}),
   createTask: (args: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<import('../shared/tasks').TaskItem> =>

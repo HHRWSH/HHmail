@@ -26,6 +26,30 @@ export interface ParsedMailLike {
     contentId?: string
     contentDisposition?: string
   }[]
+  /** mailparser 的 headers：Map 或普通对象（不同版本不同） */
+  headers?: unknown
+}
+
+/** 从 mailparser 的 headers 里取一个头（兼容 Map / 普通对象，大小写不敏感） */
+export function headerValue(headers: unknown, name: string): string | null {
+  if (!headers) return null
+  const lower = name.toLowerCase()
+  const pick = (v: unknown): string | null =>
+    Array.isArray(v) ? v.map(String).join(', ') : v == null ? null : String(v)
+  try {
+    if (headers instanceof Map) {
+      for (const [k, v] of headers) if (String(k).toLowerCase() === lower) return pick(v)
+      return null
+    }
+    if (typeof headers === 'object') {
+      for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+        if (k.toLowerCase() === lower) return pick(v)
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 function toAddrList(value?: { name?: string; address?: string }[]): string[] {
@@ -91,7 +115,10 @@ export function normalizeParsed(parsed: ParsedMailLike, uid: number, flags: stri
     bodyHtml,
     snippet: makeSnippet(bodyText),
     attachments,
-    flags
+    flags,
+    // 一键退订头（V2.3）：解析阶段原样取出，退订时再按安全规则分类
+    listUnsubscribe: headerValue(parsed.headers, 'list-unsubscribe'),
+    listUnsubscribePost: headerValue(parsed.headers, 'list-unsubscribe-post')
   }
 }
 

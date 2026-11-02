@@ -198,6 +198,8 @@ export function createMockBridge(): WindowApi {
   const mockFlagged = new Set<number>()
   // V2.3：待办（内存，E2E 用；首次 listTasks 时按邮件播种几条）
   const mockTasks: import('@shared/tasks').TaskItem[] = []
+  // V2.3 退订：本地记录（mock 只记 done）
+  const mockUnsubscribed = new Set<number>()
   // V2.2：彩色类别（默认给 Gmail 同款 6 个）
   let mockCategorySeq = 1
   const mockCategories = new Map<number, { id: number; name: string; color: string }>()
@@ -385,7 +387,10 @@ export function createMockBridge(): WindowApi {
             : [],
         savedSummary: summary?.text ?? null,
         savedSummaryModel: summary?.model ?? null,
-        savedSummaryAt: summary?.at ?? null
+        savedSummaryAt: summary?.at ?? null,
+        listUnsubscribe: '<https://example.com/unsubscribe?id=' + base.id + '>',
+        listUnsubscribePost: 'List-Unsubscribe=One-Click',
+        unsubscribe: mockUnsubscribed.has(base.id) ? { status: 'done' as const, detail: null, at: Date.now() } : null
       }
       return detail
     },
@@ -901,6 +906,13 @@ export function createMockBridge(): WindowApi {
       return out.sort((a, b) => a.ts - b.ts)
     },
     // ---- 待办（V2.3）：内存实现，供渲染层 E2E 勾选/持久化验证 ----
+    // V2.3 退订（mock）：只记本地状态，模拟一键退订成功
+    async unsubscribe(id: number) {
+      const mail = mails.find((m) => m.id === id)
+      if (!mail) throw Object.assign(new Error('邮件不存在或已被移除。'), { code: 'UNKNOWN' })
+      mockUnsubscribed.add(id)
+      return { ok: true, kind: 'one-click', detail: '已发送一键退订请求（mock）' }
+    },
     async listTasks() {
       const mails = await this.listMails({ limit: 20, offset: 0 })
       if (mockTasks.length === 0) {

@@ -352,6 +352,15 @@ try {
   const dlToast = await page.$eval(".toast", (el) => el.textContent).catch(() => "");
   check("附件点击后可保存", /已保存/.test(dlToast), dlToast.slice(0, 60));
 
+  // 一键退订（V2.3）：带 List-Unsubscribe 头时出现按钮 → 二次确认（全局 dialog 处理器自动接受）→ 变为已退订
+  check("带退订头的邮件显示退订按钮", await page.isVisible('[data-testid="unsubscribe-btn"]'));
+  const unsubBtnBefore = await page.$eval('[data-testid="unsubscribe-btn"]', (el) => el.textContent || '');
+  check("退订按钮文案带图标", unsubBtnBefore.includes('退订'), unsubBtnBefore.trim());
+  await page.click('[data-testid="unsubscribe-btn"]');
+  await page.waitForTimeout(600);
+  const unsubBtnAfter = await page.$eval('[data-testid="unsubscribe-btn"]', (el) => el.textContent || '').catch(() => '');
+  check("退订成功后按钮显示已退订", /已退订/.test(unsubBtnAfter), unsubBtnAfter.trim());
+
   // AI 总结（mock 桥返回；成功后自动保存，因此最终以 saved-summary 呈现）
   await page.click('[data-testid="ai-summarize-btn"]');
   await page.waitForSelector('[data-testid="ai-summary"], [data-testid="saved-summary"]', { timeout: 5000 });

@@ -77,6 +77,9 @@ export const listEventsSchema = z
   })
   .strict()
 
+/** 一键退订：只按邮件 id 发起（地址从邮件头解析，渲染层不能自定义 URL） */
+export const unsubscribeSchema = z.object({ id: z.number().int().positive() }).strict()
+
 // ---- 待办（V2.3） ----
 /** 新建任务：标题 1..300；dueTs 可为 null（无截止）；可关联邮件 */
 export const taskCreateSchema = z

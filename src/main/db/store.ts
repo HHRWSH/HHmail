@@ -259,6 +259,8 @@ export interface MessageStore {
   listSentItems(limit: number): Promise<SentItem[]>
   /** 删除一条已发送记录 */
   deleteSentItem(id: number): Promise<void>
+  /** 记录本地退订结果（done/failed + 说明；V2.3，只记本地不改服务端） */
+  setUnsubscribeState(messageId: number, status: 'done' | 'failed', detail?: string | null): Promise<void>
   // ---- 待办（V2.3） ----
   /** 全部待办（关联邮件主题/发件人；按截止升序、无截止靠后） */
   listTasks(): Promise<TaskItem[]>

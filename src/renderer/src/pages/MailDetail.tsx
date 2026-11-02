@@ -17,6 +17,7 @@ import { renderMarkdown } from '@shared/markdown'
 import { mergeTags, parseVocabulary } from '@shared/tags'
 import { avatarColor, avatarInitial } from '@shared/avatar'
 import { useSettings } from '../settings-context'
+import { parseUnsubscribe, unsubscribeButtonLabel, unsubscribeConfirmText } from '@shared/unsubscribe'
 import { SummaryView } from '../components/SummaryView'
 import { buildQuotedBody, buildReplySubject, ComposeModal, type ComposeInitial } from '../components/ComposeModal'
 
@@ -89,6 +90,33 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
     },
     [onToast]
   )
+
+  // V2.3 一键退订：只从邮件头解析方案（不发请求），点击时二次确认后走 IPC
+  const [unsubBusy, setUnsubBusy] = useState(false)
+  const unsubInfo = useMemo(
+    () =>
+      parseUnsubscribe({
+        listUnsubscribe: mail?.listUnsubscribe ?? null,
+        listUnsubscribePost: mail?.listUnsubscribePost ?? null
+      }),
+    [mail?.listUnsubscribe, mail?.listUnsubscribePost]
+  )
+  const doUnsubscribe = useCallback(async () => {
+    if (!mail || unsubBusy) return
+    if (unsubInfo.kind === 'none') return
+    if (!window.confirm(unsubscribeConfirmText(unsubInfo))) return
+    setUnsubBusy(true)
+    try {
+      const res = await api.unsubscribe(mail.id)
+      onToast(`✅ ${res.detail}`)
+      await load(mail.id)
+      onMailChanged?.()
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setUnsubBusy(false)
+    }
+  }, [mail, unsubBusy, unsubInfo, onToast, load, onMailChanged])
 
   useEffect(() => {
     void load(mailId)
@@ -540,6 +568,24 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
           >
             ↪ 转发
           </button>
+          {/* V2.3 一键退订：仅当邮件头带 List-Unsubscribe 时出现；必须二次确认 */}
+          {unsubInfo.kind !== 'none' && (
+            <button
+              className="btn ghost"
+              onClick={() => void doUnsubscribe()}
+              disabled={unsubBusy || Boolean(mail.unsubscribe)}
+              title={unsubscribeConfirmText(unsubInfo)}
+              data-testid="unsubscribe-btn"
+            >
+              {mail.unsubscribe
+                ? mail.unsubscribe.status === 'done'
+                  ? '✓ 已退订'
+                  : '退订失败'
+                : unsubBusy
+                  ? '退订中…'
+                  : `🚫 ${unsubscribeButtonLabel(unsubInfo) ?? '退订'}`}
+            </button>
+          )}
         </div>
         {labelsOpen && (
           <div className="label-panel" data-testid="label-panel">
