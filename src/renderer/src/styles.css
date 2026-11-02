@@ -1212,3 +1212,29 @@ body { font-size: var(--app-font-size); }
 .compose-attach-list li { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; align-items: center; gap: 8px; font-size: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; padding: 4px 8px; }
 .compose-attach-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compose-attach-list .size { color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* ---------- 待办（V2.3） ---------- */
+.tasks-wrap { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 24px; height: 100%; overflow: auto; }
+.tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tasks-title { font-size: 17px; font-weight: 600; display: flex; align-items: baseline; gap: 10px; }
+.tasks-title .sub { font-size: 12px; font-weight: 400; opacity: 0.6; }
+.tasks-filters { display: flex; gap: 6px; }
+.tasks-add { display: flex; gap: 8px; align-items: center; }
+.tasks-add .input { flex: 1; min-width: 160px; }
+.tasks-add input[type='datetime-local'] { flex: none; width: 190px; }
+.tasks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.task-item { display: grid; grid-template-columns: 20px minmax(0, 1fr) 108px 44px auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border, rgba(127,127,127,0.2)); border-radius: 8px; }
+.task-item.done .task-title { text-decoration: line-through; opacity: 0.55; }
+.task-item.overdue { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.05); }
+.task-check { width: 16px; height: 16px; cursor: pointer; }
+.task-title { background: none; border: none; text-align: left; font-size: 13px; color: inherit; cursor: pointer; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-title:hover { text-decoration: underline; }
+.task-due { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task-due.overdue { color: #ef4444; opacity: 1; font-weight: 600; }
+.task-source { font-size: 11px; text-align: center; border-radius: 6px; padding: 1px 0; opacity: 0.85; }
+.task-source.card { background: rgba(59,130,246,0.14); color: #3b82f6; }
+.task-source.summary { background: rgba(16,185,129,0.14); color: #10b981; }
+.task-source.manual { background: rgba(127,127,127,0.18); }
+.task-actions { display: flex; gap: 6px; }
+.task-edit { grid-column: 2 / span 4; display: flex; gap: 8px; align-items: center; }
+.task-edit .input:first-child { flex: 1; }
+.tasks-empty { opacity: 0.6; font-size: 12px; padding: 12px 2px; }

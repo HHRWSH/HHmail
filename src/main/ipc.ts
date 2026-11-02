@@ -28,6 +28,10 @@ import {
   pickDirectorySchema,
   countMailsSchema,
   listEventsSchema,
+  taskCreateSchema,
+  taskUpdateSchema,
+  taskIdSchema,
+  taskRebuildSchema,
   setFlaggedSchema,
   categoryCreateSchema,
   categoryUpdateSchema,
@@ -66,6 +70,7 @@ import type { AppSettings, IpcResult, NewMailEvent, SendMailArgs, SetSettingsArg
 import type { AppContext } from './bootstrap'
 import type { Logger } from './logger'
 import { plainFromHtml } from './mail/mime'
+import { rebuildTasksForMessages } from './tasks/rebuild'
 import { deriveRuleTags, parseAiTags, parseVocabulary } from '../shared/tags'
 import { describeProbeResult, probeSmtpAuth } from './mail/smtpProbe'
 import { describeSendResult, sendSmtpMail, type SmtpSendResult } from './mail/smtpSend'
@@ -144,6 +149,8 @@ async function summarizeOne(
   if (!result.degraded) {
     await ctx.store.saveSummary(id, result.text, model)
   }
+  // V2.3：摘要更新后重建这封邮件的待办（摘要行动项 → 任务）
+  await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, [id]).catch(() => undefined)
   // M1 双产物：再生成一份「给 AI 检索用的索引卡片」并入库（失败不影响摘要）
   await buildIndexCardFor(ctx, id, mail.threadId)
   return { text: result.text, threadId: result.threadId, messageCount: thread.length, model, savedAtMs: Date.now(), degraded: result.degraded }
@@ -240,6 +247,7 @@ export async function handleNewMails(
             { systemPrompt: settings.summaryPrompt }
           )
           await ctx.store.saveSummary(item.id, res.text, ctx.ai.modelName())
+          await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, [item.id]).catch(() => undefined)
           summary = res.text
           // M1：同步维护检索索引卡片（失败不影响通知）
           await buildIndexCardFor(ctx, item.id, mail.threadId)
@@ -618,6 +626,54 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
       const src = await ctx.store.listCalendarSources(args.from, args.to)
       const events = src.flatMap((m) => mailToEvents(m))
       return events.filter((e) => e.ts >= args.from && e.ts <= args.to)
+    })
+  )
+
+  // ---- 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 ----
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_LIST,
+    wrap(ctx, null, async () => ctx.store.listTasks())
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_CREATE,
+    wrap(ctx, taskCreateSchema, async (args: { title: string; dueTs?: number | null; messageId?: number | null }) => {
+      const task = await ctx.store.createTask({
+        title: args.title.trim(),
+        dueTs: args.dueTs ?? null,
+        messageId: args.messageId ?? null
+      })
+      ctx.logger.info('tasks.created', { id: task.id, source: task.source })
+      return task
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_UPDATE,
+    wrap(ctx, taskUpdateSchema, async (args: { id: number; title?: string; dueTs?: number | null; done?: boolean }) => {
+      const task = await ctx.store.updateTask(args.id, { title: args.title, dueTs: args.dueTs, done: args.done })
+      return task
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_DELETE,
+    wrap(ctx, taskIdSchema, async (args: { id: number }) => {
+      await ctx.store.deleteTask(args.id)
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_REBUILD,
+    wrap(ctx, taskRebuildSchema, async (args: { messageIds?: number[] }) => {
+      // 不传 ids → 全量重建（设置页「重建待办」按钮/升级后首次打开用）
+      let ids = args.messageIds
+      if (!ids || ids.length === 0) {
+        const mails = await ctx.store.query({ limit: 5000, offset: 0 })
+        ids = mails.map((m) => m.id)
+      }
+      const res = await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, ids)
+      return res
     })
   )
 
@@ -1078,6 +1134,13 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
         void handleNewMails(ctx, newUids, settings, { notify: false, reason: 'manual-sync' }).catch((e) =>
           ctx.logger.warn('newmail.handle.failed', { reason: e instanceof Error ? e.message : String(e) })
         )
+      }
+      // V2.3：同步完成后按新 UID 增量重建待办（卡片 DUE → 任务）
+      if (newUids.length > 0) {
+        const ids = await ctx.store.idsByUids(newUids).catch(() => [] as number[])
+        if (ids.length > 0) {
+          void rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, ids).catch(() => undefined)
+        }
       }
       return result
     })

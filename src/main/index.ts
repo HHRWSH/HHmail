@@ -9,6 +9,7 @@ import * as path from 'node:path'
 import { bootstrap, normalizeDbFileName, type AppContext } from './bootstrap'
 import { FileLogger } from './logger'
 import { registerIpcHandlers, summarizePendingBatch } from './ipc'
+import { rebuildTasksForMessages } from './tasks/rebuild'
 import { repairNoisyBodies } from './db/repair'
 import { createTray, type TrayController } from './tray'
 import { handleNewMails } from './ipc'
@@ -70,6 +71,8 @@ let ctx: AppContext | null = null
 let tray: TrayController | null = null
 let snoozeTimer: SnoozeSchedulerHandle | null = null
 let autoSync: AutoSyncScheduler | null = null
+/** V2.3：待办全量重建只在本次进程里做一次（之后靠同步/摘要后的增量） */
+let tasksStartupRebuilt = false
 /** 每次自动同步成功后最多补几封摘要（控制成本） */
 const AUTO_SUMMARY_CATCHUP_LIMIT = 3
 let isQuitting = false
@@ -298,6 +301,19 @@ async function main(): Promise<void> {
     // 只处理少量缺摘要的邮件，失败也只记日志；没有 API Key 时直接跳过。
     afterSync: async (reason) => {
       if (!ctx) return
+      // V2.3：进程内首次同步完成后做一次全量待办重建（老库升级后立刻能看到待办；之后只做增量）
+      if (!tasksStartupRebuilt) {
+        tasksStartupRebuilt = true
+        void (async () => {
+          try {
+            const mails = await ctx!.store.query({ limit: 5000, offset: 0 })
+            const res = await rebuildTasksForMessages({ store: ctx!.store, logger }, mails.map((m) => m.id))
+            logger.info('tasks.startup_rebuild', { messages: res.messages, tasks: res.tasks })
+          } catch (e) {
+            logger.warn('tasks.startup_rebuild.failed', { reason: e instanceof Error ? e.message : String(e) })
+          }
+        })()
+      }
       const settings = await ctx.settings.get()
       if (!settings.autoSummarizeNew || !settings.hasApiKey) return
       const res = await summarizePendingBatch(ctx, { limit: AUTO_SUMMARY_CATCHUP_LIMIT })

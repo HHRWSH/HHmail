@@ -196,6 +196,8 @@ export function createMockBridge(): WindowApi {
   const mockTagExamples = new Map<number, string[]>()
   const mockManualTags = new Map<number, string[]>()
   const mockFlagged = new Set<number>()
+  // V2.3：待办（内存，E2E 用；首次 listTasks 时按邮件播种几条）
+  const mockTasks: import('@shared/tasks').TaskItem[] = []
   // V2.2：彩色类别（默认给 Gmail 同款 6 个）
   let mockCategorySeq = 1
   const mockCategories = new Map<number, { id: number; name: string; color: string }>()
@@ -894,6 +896,98 @@ export function createMockBridge(): WindowApi {
         for (const e of events) if (e.ts >= args.from && e.ts <= args.to) out.push(e)
       })
       return out.sort((a, b) => a.ts - b.ts)
+    },
+    // ---- 待办（V2.3）：内存实现，供渲染层 E2E 勾选/持久化验证 ----
+    async listTasks() {
+      const mails = await this.listMails({ limit: 20, offset: 0 })
+      if (mockTasks.length === 0) {
+        const now = Date.now()
+        const DAY = 86_400_000
+        mockTasks.push(
+          {
+            id: 1,
+            messageId: mails[0]?.id ?? null,
+            title: '提交 Lab 0 报告',
+            dueTs: now - 2 * DAY,
+            source: 'summary',
+            done: false,
+            createdAt: now,
+            updatedAt: now,
+            subject: mails[0]?.subject ?? null,
+            fromName: mails[0]?.fromName ?? null
+          },
+          {
+            id: 2,
+            messageId: mails[1]?.id ?? null,
+            title: '预约图书馆座位',
+            dueTs: now + 3_600_000,
+            source: 'card',
+            done: false,
+            createdAt: now,
+            updatedAt: now,
+            subject: mails[1]?.subject ?? null,
+            fromName: mails[1]?.fromName ?? null
+          },
+          {
+            id: 3,
+            messageId: null,
+            title: '手动记一件事（无截止）',
+            dueTs: null,
+            source: 'manual',
+            done: false,
+            createdAt: now,
+            updatedAt: now,
+            subject: null,
+            fromName: null
+          },
+          {
+            id: 4,
+            messageId: null,
+            title: '已经完成的事',
+            dueTs: now - DAY,
+            source: 'manual',
+            done: true,
+            createdAt: now,
+            updatedAt: now,
+            subject: null,
+            fromName: null
+          }
+        )
+      }
+      return mockTasks.map((t) => ({ ...t }))
+    },
+    async createTask(args: { title: string; dueTs?: number | null; messageId?: number | null }) {
+      const now = Date.now()
+      const task = {
+        id: mockTasks.reduce((n, t) => Math.max(n, t.id), 0) + 1,
+        messageId: args.messageId ?? null,
+        title: args.title,
+        dueTs: args.dueTs ?? null,
+        source: 'manual' as const,
+        done: false,
+        createdAt: now,
+        updatedAt: now,
+        subject: null,
+        fromName: null
+      }
+      mockTasks.push(task)
+      return { ...task }
+    },
+    async updateTask(args: { id: number; title?: string; dueTs?: number | null; done?: boolean }) {
+      const t = mockTasks.find((x) => x.id === args.id)
+      if (!t) throw new Error('task not found: ' + args.id)
+      if (args.title !== undefined) t.title = args.title
+      if (args.dueTs !== undefined) t.dueTs = args.dueTs
+      if (args.done !== undefined) t.done = args.done
+      t.updatedAt = Date.now()
+      return { ...t }
+    },
+    async deleteTask(id: number) {
+      const i = mockTasks.findIndex((x) => x.id === id)
+      if (i >= 0) mockTasks.splice(i, 1)
+    },
+    async rebuildTasks() {
+      return { messages: 0, tasks: mockTasks.length, skipped: 0 }
     },
     async tagCounts() {
       // 与主进程一致：按「每封邮件实际持有的标签」统计（DISTINCT message_id）

@@ -77,6 +77,32 @@ export const listEventsSchema = z
   })
   .strict()
 
+// ---- 待办（V2.3） ----
+/** 新建任务：标题 1..300；dueTs 可为 null（无截止）；可关联邮件 */
+export const taskCreateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(300),
+    dueTs: z.number().int().nonnegative().nullable().optional(),
+    messageId: z.number().int().positive().nullable().optional()
+  })
+  .strict()
+
+export const taskUpdateSchema = z
+  .object({
+    id: z.number().int().positive(),
+    title: z.string().trim().min(1).max(300).optional(),
+    dueTs: z.number().int().nonnegative().nullable().optional(),
+    done: z.boolean().optional()
+  })
+  .strict()
+
+export const taskIdSchema = z.object({ id: z.number().int().positive() }).strict()
+
+/** 重建待办：不传 messageIds = 全量重建 */
+export const taskRebuildSchema = z
+  .object({ messageIds: z.array(z.number().int().positive()).max(2000).optional() })
+  .strict()
+
 export const syncMailSchema = z.object({
   folders: z.array(z.string().min(1).max(200)).max(10).optional()
 })

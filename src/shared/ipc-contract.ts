@@ -74,6 +74,12 @@ export const IPC_CHANNELS = {
   MAIL_COUNT: 'mail:count',
   /** 日历：某时间范围内的事件（截止 + 卡片里提到的日期） */
   MAIL_LIST_EVENTS: 'mail:list-events',
+  /** 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 */
+  TASKS_LIST: 'tasks:list',
+  TASKS_CREATE: 'tasks:create',
+  TASKS_UPDATE: 'tasks:update',
+  TASKS_DELETE: 'tasks:delete',
+  TASKS_REBUILD: 'tasks:rebuild',
   /** 自动标签（V2.2：A 规则映射 + B AI 主题标签 + 示例邮件） */
   TAGS_COUNTS: 'tags:counts',
   TAGS_EXAMPLES: 'tags:examples',

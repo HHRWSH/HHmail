@@ -1124,3 +1124,89 @@ describe('SqliteMessageStore —— 真实 better-sqlite3 契约测试', () => {
     fs.rmSync(legacyPath, { force: true })
   })
 })
+
+describe('SqliteMessageStore —— 待办（V2.3，独立库）', () => {
+  let taskDbPath: string
+  let taskStore: SqliteMessageStore
+
+  beforeAll(() => {
+    taskDbPath = path.join(os.tmpdir(), `mail-ai-tasks-test-${process.pid}-${Date.now()}.db`)
+    taskStore = new SqliteMessageStore(taskDbPath, new MemoryLogger())
+  })
+
+  afterAll(() => {
+    taskStore.close()
+    for (const suffix of ['', '-wal', '-shm']) {
+      try {
+        fs.rmSync(taskDbPath + suffix, { force: true })
+      } catch {
+        /* ignore */
+      }
+    }
+  })
+
+  it('手动任务 CRUD + 勾选完成持久化', async () => {
+    const created = await taskStore.createTask({ title: '去交材料' })
+    expect(created).toMatchObject({ title: '去交材料', done: false, source: 'manual', messageId: null })
+
+    const updated = await taskStore.updateTask(created.id, { done: true })
+    expect(updated.done).toBe(true)
+    expect((await taskStore.listTasks()).find((t) => t.id === created.id)?.done).toBe(true)
+
+    const withDue = await taskStore.updateTask(created.id, { title: '交材料（改）', dueTs: 123456 })
+    expect(withDue).toMatchObject({ title: '交材料（改）', dueTs: 123456, done: true })
+
+    await taskStore.deleteTask(created.id)
+    expect((await taskStore.listTasks()).find((t) => t.id === created.id)).toBeUndefined()
+  })
+
+  it('replaceAutoTasks：替换 card/summary、保留手动任务', async () => {
+    await taskStore.upsertMessages([makeMsg(311, { subject: 'Lab 0 提交' })])
+    const mailId = (await taskStore.query({ limit: 2000, offset: 0 })).find((m) => m.uid === 311)?.id as number
+
+    await taskStore.replaceAutoTasks([mailId], [
+      { messageId: mailId, title: '提交 Lab 0', dueTs: 1000, done: false, source: 'summary' }
+    ])
+    const first = (await taskStore.tasksForMessages([mailId]))[0]
+    await taskStore.updateTask(first.id, { done: true })
+
+    const manual = await taskStore.createTask({ title: '手动：问 TA' })
+    await taskStore.replaceAutoTasks([mailId], [
+      { messageId: mailId, title: '提交 Lab 0', dueTs: 1000, done: false, source: 'summary' },
+      { messageId: mailId, title: '提交 Lab 1', dueTs: 2000, done: false, source: 'card' }
+    ])
+
+    const all = await taskStore.listTasks()
+    expect(all.filter((t) => t.source === 'manual').map((t) => t.id)).toContain(manual.id)
+    const auto = all.filter((t) => t.messageId === mailId)
+    expect(auto.map((t) => t.title).sort()).toEqual(['提交 Lab 0', '提交 Lab 1'])
+  })
+
+  it('listTasks 关联邮件主题；getIndexDocsFor 带 subject；idsByUids 映射', async () => {
+    await taskStore.upsertMessages([makeMsg(321, { subject: '考试安排' })])
+    const id = (await taskStore.query({ limit: 2000, offset: 0 })).find((m) => m.uid === 321)?.id as number
+    await taskStore.saveIndexDoc({
+      messageId: id,
+      card: '[TYPE] 考试 | [DUE] 2026-09-20 09:00',
+      type: '考试',
+      course: null,
+      term: null,
+      dueTs: 1_890_000_000_000,
+      entities: [],
+      aliases: [],
+      questions: [],
+      model: 'test',
+      tags: []
+    } as never)
+    await taskStore.createTask({ title: '带邮件的手动任务', messageId: id })
+
+    const docs = await taskStore.getIndexDocsFor([id])
+    expect(docs[0]).toMatchObject({ messageId: id, subject: '考试安排', dueTs: 1_890_000_000_000 })
+
+    const task = (await taskStore.listTasks()).find((t) => t.title === '带邮件的手动任务')
+    expect(task?.subject).toBe('考试安排')
+
+    expect(await taskStore.idsByUids([321])).toEqual([id])
+    expect(await taskStore.idsByUids([999])).toEqual([])
+  })
+})

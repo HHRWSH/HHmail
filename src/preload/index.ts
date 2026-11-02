@@ -99,6 +99,15 @@ const api: WindowApi = {
   /** 日历：取某时间范围内的事件（截止 + 卡片里的日期） */
   listEvents: (args: { from: number; to: number }): Promise<import('../shared/calendar').CalendarEvent[]> =>
     invoke(IPC_CHANNELS.MAIL_LIST_EVENTS, args),
+  /** 待办（V2.3） */
+  listTasks: (): Promise<import('../shared/tasks').TaskItem[]> => invoke(IPC_CHANNELS.TASKS_LIST, {}),
+  createTask: (args: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<import('../shared/tasks').TaskItem> =>
+    invoke(IPC_CHANNELS.TASKS_CREATE, args),
+  updateTask: (args: { id: number; title?: string; dueTs?: number | null; done?: boolean }): Promise<import('../shared/tasks').TaskItem> =>
+    invoke(IPC_CHANNELS.TASKS_UPDATE, args),
+  deleteTask: (id: number): Promise<void> => invoke(IPC_CHANNELS.TASKS_DELETE, { id }),
+  rebuildTasks: (args?: { messageIds?: number[] }): Promise<{ messages: number; tasks: number; skipped: number }> =>
+    invoke(IPC_CHANNELS.TASKS_REBUILD, args ?? {}),
   tagCounts: (): Promise<Array<{ tag: string; count: number }>> => invoke(IPC_CHANNELS.TAGS_COUNTS),
   tagExamples: (): Promise<TagExample[]> => invoke(IPC_CHANNELS.TAGS_EXAMPLES),
   clearManualTags: (id: number): Promise<void> => invoke(IPC_CHANNELS.TAGS_CLEAR_MANUAL, { id }),

@@ -22,6 +22,7 @@ import { buildFtsQuery, buildFtsQueryFromTokens, buildLikePattern, buildLikePatt
 import { rankByTerms } from '../../shared/retrievalRank'
 import type { WeightedTerm } from '../../shared/retrievalQuery'
 import type { ThreadIndexEntry } from '../mail/thread'
+import type { TaskCandidate, TaskItem } from '../../shared/tasks'
 import type { CalendarSourceMail } from '../../shared/calendar'
 
 const ACCOUNT_ID = 1 // MVP 单账户
@@ -703,6 +704,18 @@ export class SqliteMessageStore implements MessageStore {
     return row.m ?? 0
   }
 
+  async idsByUids(uids: number[], folder: string = 'INBOX'): Promise<number[]> {
+    if (uids.length === 0) return []
+    const out: number[] = []
+    for (const chunk of chunkIds(uids)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(`SELECT id FROM messages WHERE account_id = ? AND folder = ? AND uid IN (${placeholders})`)
+        .all(ACCOUNT_ID, folder, ...chunk) as Array<{ id: number }>
+      out.push(...rows.map((r) => r.id))
+    }
+    return out
+  }
   async listUids(folder: string = 'INBOX'): Promise<number[]> {
     const rows = this.db
       .prepare('SELECT uid FROM messages WHERE account_id = ? AND folder = ? ORDER BY uid ASC')
@@ -1690,6 +1703,160 @@ export class SqliteMessageStore implements MessageStore {
 
   async deleteSentItem(id: number): Promise<void> {
     this.db.prepare('DELETE FROM sent_items WHERE id = ?').run(id)
+  }
+
+  // ---------------- 待办（V2.3） ----------------
+
+  /** 行 → TaskItem（关联邮件主题/发件人） */
+  private mapTaskRow(r: {
+    id: number
+    message_id: number | null
+    title: string
+    due_ts: number | null
+    source: string
+    done: number
+    created_at: number
+    updated_at: number
+    subject?: string | null
+    from_name?: string | null
+  }): TaskItem {
+    return {
+      id: r.id,
+      messageId: r.message_id,
+      title: r.title,
+      dueTs: r.due_ts,
+      source: r.source === 'card' || r.source === 'manual' ? r.source : 'summary',
+      done: r.done === 1,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      subject: r.subject ?? null,
+      fromName: r.from_name ?? null
+    }
+  }
+
+  async listTasks(): Promise<TaskItem[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
+                m.subject AS subject, m.from_name AS from_name
+         FROM tasks t LEFT JOIN messages m ON m.id = t.message_id
+         ORDER BY CASE WHEN t.done = 1 THEN 1 ELSE 0 END,
+                  CASE WHEN t.due_ts IS NULL THEN 1 ELSE 0 END,
+                  t.due_ts ASC, t.created_at DESC`
+      )
+      .all() as Parameters<SqliteMessageStore['mapTaskRow']>[0][]
+    return rows.map((r) => this.mapTaskRow(r))
+  }
+
+  async tasksForMessages(ids: number[]): Promise<TaskItem[]> {
+    if (ids.length === 0) return []
+    const out: TaskItem[] = []
+    for (const chunk of chunkIds(ids)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(
+          `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
+                  m.subject AS subject, m.from_name AS from_name
+           FROM tasks t LEFT JOIN messages m ON m.id = t.message_id
+           WHERE t.message_id IN (${placeholders})`
+        )
+        .all(...chunk) as Parameters<SqliteMessageStore['mapTaskRow']>[0][]
+      out.push(...rows.map((r) => this.mapTaskRow(r)))
+    }
+    return out
+  }
+
+  async replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void> {
+    const now = Date.now()
+    const tx = this.db.transaction(() => {
+      for (const chunk of chunkIds(messageIds)) {
+        const placeholders = chunk.map(() => '?').join(',')
+        this.db
+          .prepare(`DELETE FROM tasks WHERE source != 'manual' AND message_id IN (${placeholders})`)
+          .run(...chunk)
+      }
+      const insert = this.db.prepare(
+        `INSERT INTO tasks (message_id, title, due_ts, source, done, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const t of tasks) {
+        insert.run(t.messageId, t.title.slice(0, 300), t.dueTs ?? null, t.source, t.done ? 1 : 0, now, now)
+      }
+    })
+    tx()
+  }
+
+  async createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem> {
+    const now = Date.now()
+    const info = this.db
+      .prepare(
+        `INSERT INTO tasks (message_id, title, due_ts, source, done, created_at, updated_at)
+         VALUES (?, ?, ?, 'manual', 0, ?, ?)`
+      )
+      .run(input.messageId ?? null, String(input.title).trim().slice(0, 300), input.dueTs ?? null, now, now)
+    const id = Number(info.lastInsertRowid)
+    const list = await this.tasksForMessages(input.messageId ? [input.messageId] : [])
+    const created = list.find((t) => t.id === id)
+    if (created) return created
+    // 手动任务（无关联邮件）不在 tasksForMessages 的结果里 → 直接按 id 查一次
+    const row = this.db
+      .prepare(
+        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
+                NULL AS subject, NULL AS from_name
+         FROM tasks t WHERE t.id = ?`
+      )
+      .get(id) as Parameters<SqliteMessageStore['mapTaskRow']>[0]
+    return this.mapTaskRow(row)
+  }
+
+  async updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem> {
+    const sets: string[] = ['updated_at = ?']
+    const bind: unknown[] = [Date.now()]
+    if (patch.title !== undefined) {
+      sets.push('title = ?')
+      bind.push(String(patch.title).trim().slice(0, 300))
+    }
+    if (patch.dueTs !== undefined) {
+      sets.push('due_ts = ?')
+      bind.push(patch.dueTs)
+    }
+    if (patch.done !== undefined) {
+      sets.push('done = ?')
+      bind.push(patch.done ? 1 : 0)
+    }
+    bind.push(id)
+    this.db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...bind)
+    const row = this.db
+      .prepare(
+        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
+                m.subject AS subject, m.from_name AS from_name
+         FROM tasks t LEFT JOIN messages m ON m.id = t.message_id WHERE t.id = ?`
+      )
+      .get(id) as Parameters<SqliteMessageStore['mapTaskRow']>[0]
+    return this.mapTaskRow(row)
+  }
+
+  async deleteTask(id: number): Promise<void> {
+    this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  }
+
+  async getIndexDocsFor(
+    ids: number[]
+  ): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>> {
+    if (ids.length === 0) return []
+    const out: Array<{ messageId: number; card: string; dueTs: number | null; subject: string }> = []
+    for (const chunk of chunkIds(ids)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(
+          `SELECT d.message_id, d.card, d.due_ts, COALESCE(m.subject, '') AS subject
+           FROM mail_index_docs d LEFT JOIN messages m ON m.id = d.message_id
+           WHERE d.message_id IN (${placeholders})`
+        )
+        .all(...chunk) as Array<{ message_id: number; card: string; due_ts: number | null; subject: string }>
+      out.push(...rows.map((r) => ({ messageId: r.message_id, card: r.card, dueTs: r.due_ts, subject: r.subject })))
+    }
+    return out
   }
 
   close(): void {

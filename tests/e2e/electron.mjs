@@ -101,6 +101,8 @@ try {
     // V2.2：附件保存到指定目录 + 目录选择/打开 + 自动标签
     // V2.3：pickAttachments = 发信附件（主进程弹文件框读数）
     "saveAttachment", "pickDirectory", "pickAttachments", "openPath",
+    // V2.3：待办（列表/新增/更新/删除/重建）
+    "listTasks", "createTask", "updateTask", "deleteTask", "rebuildTasks",
     "tagCounts", "tagExamples", "setTagExample", "rebuildTags", "setMailTagManual",
     // V2.2：红旗 + 真实总数 + 彩色类别
     "setFlagged", "countMails", "listCategories", "categoryCounts", "createCategory", "updateCategory",

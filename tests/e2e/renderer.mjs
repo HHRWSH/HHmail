@@ -137,6 +137,46 @@ try {
   await page.click('[data-testid="calendar-today"]');
   await page.waitForTimeout(200);
   check("回到今天恢复当前月", (await page.$eval('[data-testid="calendar-month"]', (el) => el.textContent || "")).trim() === beforeMonth);
+
+  // ---------- 待办（卡片 DUE + 摘要行动项 → 可勾选任务） ----------
+  check("侧边栏有待办入口", await page.isVisible('[data-nav="tasks"]'));
+  await page.click('[data-nav="tasks"]');
+  await page.waitForSelector('[data-testid="tasks-page"]', { timeout: 8000 });
+  const taskItems = await page.locator('[data-testid="task-item"]').count();
+  check("待办列表有任务", taskItems >= 3, `实际 ${taskItems} 条`);
+  const overdueCount = await page.locator('[data-testid="task-item"][data-overdue="1"]').count();
+  check("逾期任务带红色标记", overdueCount >= 1, `实际 ${overdueCount} 条逾期`);
+  // 勾选第一条未完成任务 → 变成已完成，并持久化（切到「已完成」也能看到）
+  // 注意：勾选后该条会从「全部」里移出（全部 = 未完成），Playwright 的 check() 会等元素变勾选而超时，
+  // 所以这里用 DOM click 触发同一条 React onChange 路径。
+  const openBefore = await page.locator('[data-testid="task-item"][data-done="0"]').count();
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="task-item"][data-done="0"] [data-testid="task-check"]');
+    if (el) el.click();
+  });
+  await page.waitForTimeout(500);
+  const openAfter = await page.locator('[data-testid="task-item"][data-done="0"]').count();
+  check("勾选后任务从未完成里移出", openAfter === openBefore - 1, `${openBefore} → ${openAfter}`);
+  await page.click('[data-testid="task-filter-done"]');
+  await page.waitForTimeout(300);
+  const doneItems = await page.locator('[data-testid="task-item"]').count();
+  check("「已完成」筛选能看到刚勾选的任务", doneItems >= 2, `实际 ${doneItems} 条已完成`);
+  // 手动新增一条任务
+  await page.click('[data-testid="task-filter-all"]');
+  await page.waitForTimeout(200);
+  await page.fill('[data-testid="task-add-input"]', 'E2E 手动待办');
+  await page.click('[data-testid="task-add"]');
+  await page.waitForTimeout(400);
+  const addText = await page.$eval('[data-testid="tasks-list"]', (el) => el.textContent || "").catch(() => "");
+  check("手动新增待办出现在列表里", addText.includes("E2E 手动待办"), addText.slice(0, 60));
+  check("手动任务带「手动」来源标记", (await page.locator('[data-testid="task-source"].manual').count()) >= 1);
+  // 删除刚加的那条（页面顶部有全局 dialog 处理器统一 accept 确认框，这里不要再注册 once）
+  const addRow = page.locator('[data-testid="task-item"]', { hasText: 'E2E 手动待办' }).first();
+  await addRow.locator('[data-testid="task-delete"]').click();
+  await page.waitForTimeout(400);
+  const afterDelete = await page.$eval('[data-testid="tasks-list"]', (el) => el.textContent || "").catch(() => "");
+  check("删除待办后列表里消失", !afterDelete.includes("E2E 手动待办"), afterDelete.slice(0, 60));
+
   await page.click('[data-nav="inbox"]');
   await page.waitForSelector(".mail-list .mail-item", { timeout: 8000 });
 

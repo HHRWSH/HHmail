@@ -1,4 +1,5 @@
 import type { CalendarEvent } from './calendar'
+import type { TaskItem } from './tasks'
 /**
  * window.api 白名单契约：preload 通过 contextBridge 暴露的能力全集。
  * renderer 只允许调用这里声明的方法；加能力 = 先在这里加方法，再在 preload 实现。
@@ -77,6 +78,16 @@ export interface WindowApi {
   }): Promise<number>
   /** 日历：取某时间范围内的事件（截止 + 卡片里提到的日期） */
   listEvents(args: { from: number; to: number }): Promise<CalendarEvent[]>
+  /** 待办（V2.3）：全部任务（含关联邮件主题/发件人） */
+  listTasks(): Promise<TaskItem[]>
+  /** 待办：手动新增 */
+  createTask(args: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem>
+  /** 待办：更新（标题/截止/完成） */
+  updateTask(args: { id: number; title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem>
+  /** 待办：删除 */
+  deleteTask(id: number): Promise<void>
+  /** 待办：重建（不传 messageIds = 全量；返回写入的任务数） */
+  rebuildTasks(args?: { messageIds?: number[] }): Promise<{ messages: number; tasks: number; skipped: number }>
   /** 自动标签：各标签的邮件数 */
   tagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>>
   /** 自动标签：用户挑的示例邮件（给 AI 当参考） */

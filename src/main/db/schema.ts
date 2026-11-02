@@ -440,6 +440,28 @@ export const SCHEMA_MIGRATIONS: readonly Migration[] = [
         ('Red category', '#d93025', 5, 0),
         ('Yellow category', '#f9ab00', 6, 0)`
     ]
+  },
+  {
+    version: 20,
+    name: 'tasks',
+    sql: [
+      // 待办（V2.3）：来源 card=索引卡片 DUE、summary=摘要行动项、manual=用户手动新增。
+      // 只读收信约束不变：这里只维护本地派生数据，不改服务端任何状态。
+      `CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER,
+        title TEXT NOT NULL,
+        due_ts INTEGER,
+        source TEXT NOT NULL,
+        done INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
+      // 同一封邮件的同一件事（标题+截止）只存一条：重建时按此去重（SQLite 里 NULL 互不相等，手动任务不受影响）
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_unique ON tasks(message_id, title, IFNULL(due_ts, -1))`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_ts)`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_message ON tasks(message_id)`
+    ]
   }
 ] as const
 

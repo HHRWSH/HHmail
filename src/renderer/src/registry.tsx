@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/Settings'
 import { SentPage } from './pages/Sent'
 import { KnowledgePage } from './pages/Knowledge'
 import { CalendarPage } from './pages/Calendar'
+import { TasksPage } from './pages/Tasks'
 import { AISearchPage } from './pages/AISearch'
 import { DraftsPage } from './pages/Drafts'
 import type { AppSettings, AuthStatus } from '@shared/types'
@@ -65,6 +66,7 @@ export const FEATURE_REGISTRY: FeatureEntry[] = [
   { id: 'drafts', label: '草稿箱', icon: '✎', enabled: true, page: DraftsPage },
   { id: 'knowledge', label: '知识库', icon: '📚', enabled: true, page: KnowledgePage },
   { id: 'calendar', label: '日历', icon: '🗓', enabled: true, page: CalendarPage },
+  { id: 'tasks', label: '待办', icon: '✅', enabled: true, page: TasksPage },
   { id: 'sent', label: '已发送', icon: '↗', enabled: true, page: SentPage },
   { id: 'settings', label: '设置', icon: '⚙︎', enabled: true, placement: 'footer', page: SettingsPage }
 ]

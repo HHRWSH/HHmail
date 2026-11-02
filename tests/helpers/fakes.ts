@@ -4,6 +4,7 @@
  * 上层逻辑（sync/thread/AI 业务）只依赖接口，用这些 fake 验证"换实现不破坏行为"。
  */
 import type { CalendarSourceMail } from '../../src/shared/calendar'
+import type { TaskCandidate, TaskItem } from '../../src/shared/tasks'
 import type {
   AttachmentPayload,
   MailboxInfo,
@@ -710,9 +711,87 @@ ${m.fromAddr}`.toLowerCase()
     return out.sort((a, b) => (a.dueTs ?? 0) - (b.dueTs ?? 0))
   }
 
+  async idsByUids(uids: number[]): Promise<number[]> {
+    const out: number[] = []
+    for (const [id, m] of this.messages) {
+      if (uids.includes(m.uid)) out.push(id)
+    }
+    return out
+  }
   /** 恢复默认：清空手动标签（内存实现） */
   async clearManualTags(messageId: number): Promise<void> {
     this.mailTags.delete(`manual:${messageId}`)
+  }
+
+  // ---- 待办（V2.3）：内存版，供 sync/snooze 等测试满足 MessageStore 契约 ----
+  private tasks: TaskItem[] = []
+  private nextTaskId = 1
+
+  async listTasks(): Promise<TaskItem[]> {
+    return [...this.tasks]
+  }
+
+  async tasksForMessages(ids: number[]): Promise<TaskItem[]> {
+    return this.tasks.filter((t) => t.messageId !== null && ids.includes(t.messageId))
+  }
+
+  async replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void> {
+    this.tasks = this.tasks.filter((t) => t.source === 'manual' || t.messageId === null || !messageIds.includes(t.messageId))
+    const now = Date.now()
+    for (const t of tasks) {
+      this.tasks.push({
+        id: this.nextTaskId++,
+        messageId: t.messageId,
+        title: t.title,
+        dueTs: t.dueTs,
+        source: t.source,
+        done: t.done,
+        createdAt: now,
+        updatedAt: now
+      })
+    }
+  }
+
+  async createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem> {
+    const now = Date.now()
+    const task: TaskItem = {
+      id: this.nextTaskId++,
+      messageId: input.messageId ?? null,
+      title: input.title,
+      dueTs: input.dueTs ?? null,
+      source: 'manual',
+      done: false,
+      createdAt: now,
+      updatedAt: now
+    }
+    this.tasks.push(task)
+    return task
+  }
+
+  async updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem> {
+    const t = this.tasks.find((x) => x.id === id)
+    if (!t) throw new Error(`task ${id} not found`)
+    if (patch.title !== undefined) t.title = patch.title
+    if (patch.dueTs !== undefined) t.dueTs = patch.dueTs
+    if (patch.done !== undefined) t.done = patch.done
+    t.updatedAt = Date.now()
+    return t
+  }
+
+  async deleteTask(id: number): Promise<void> {
+    this.tasks = this.tasks.filter((t) => t.id !== id)
+  }
+
+  async getIndexDocsFor(
+    ids: number[]
+  ): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>> {
+    return ids
+      .map((id) => {
+        const m = this.messages.get(id)
+        const due = (m as unknown as { dueTs?: number | null } | undefined)?.dueTs ?? null
+        return { messageId: id, card: '', dueTs: due, subject: m?.subject ?? '' }
+      })
+      .filter((x) => x.dueTs !== null)
   }
 
   async listTagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>> {

@@ -20,6 +20,7 @@ import type {
 } from '../../shared/types'
 
 import type { WeightedTerm } from '../../shared/retrievalQuery'
+import type { TaskCandidate, TaskItem } from '../../shared/tasks'
 
 export type { ChatMessage, ChatSession, CollectionMail, CollectionSummary, WeeklyBrief }
 import type { ParsedMessage } from '../mail/types'
@@ -125,6 +126,8 @@ export interface MessageStore {
   setSyncState(state: SyncStateRecord): Promise<void>
   /** 该文件夹本地已入库的最大 UID（0 = 无）；用于「修复同步」把游标回退到本地实际进度 */
   getMaxUid(folder?: string): Promise<number>
+  /** UID → 本地 message id（同步后重建待办等增量处理用；不存在的 UID 会被忽略） */
+  idsByUids(uids: number[], folder?: string): Promise<number[]>
   /** 该文件夹本地已入库的全部 UID（与服务端 UID SEARCH ALL 对账用） */
   listUids(folder?: string): Promise<number[]>
   /** 待 AI 总结的邮件（新→旧）：默认只返回「还没有摘要」的；force=true 时返回全部（重新生成） */
@@ -256,6 +259,24 @@ export interface MessageStore {
   listSentItems(limit: number): Promise<SentItem[]>
   /** 删除一条已发送记录 */
   deleteSentItem(id: number): Promise<void>
+  // ---- 待办（V2.3） ----
+  /** 全部待办（关联邮件主题/发件人；按截止升序、无截止靠后） */
+  listTasks(): Promise<TaskItem[]>
+  /** 指定邮件的待办（重建时用来保留已完成状态） */
+  tasksForMessages(ids: number[]): Promise<TaskItem[]>
+  /**
+   * 用新候选任务**替换**这些邮件的自动任务（card/summary），手动任务（manual）原样保留。
+   * 已存在的同 key 任务保留其 done 状态（用户勾选过的不该被重建覆盖）。
+   */
+  replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void>
+  /** 手动新增任务（messageId 可空） */
+  createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem>
+  /** 更新任务（标题/截止/完成） */
+  updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem>
+  /** 删除任务（手动删除的任务若来自 card/summary，重建时会再次出现 —— 调用方负责提示） */
+  deleteTask(id: number): Promise<void>
+  /** 批量取索引卡片（重建待办用：只有卡片/DUE，不读正文） */
+  getIndexDocsFor(ids: number[]): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>>
   close(): void
 }
 
