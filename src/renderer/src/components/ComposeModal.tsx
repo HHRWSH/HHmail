@@ -5,10 +5,21 @@
  * - 成功后写入本地「已发送」记录；带 draftId 时同时删除对应草稿。
  */
 import { memo, useEffect, useState } from 'react'
-import type { SendMailResult } from '@shared/types'
+import type { MailAttachmentPayload, SendMailResult } from '@shared/types'
 import { api } from '../bridge'
 import { errorMessage } from '../lib/errors'
 import { useSettings } from '../settings-context'
+import {
+  MAX_ATTACH_COUNT,
+  MAX_ATTACH_TOTAL_BYTES,
+  MAX_ATTACH_BYTES,
+  formatAttachmentSize,
+  mergeAttachments,
+  totalAttachmentBytes
+} from '@shared/attachments'
+
+// 兼容旧引用（ComposeModal 内部/测试都从这里导入常量）
+export { MAX_ATTACH_BYTES, MAX_ATTACH_TOTAL_BYTES, MAX_ATTACH_COUNT }
 
 export interface ComposeInitial {
   to?: string
@@ -34,6 +45,8 @@ export const ComposeModal = memo(function ComposeModal({ open, initial, onClose,
   const [cc, setCc] = useState('')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [attachments, setAttachments] = useState<MailAttachmentPayload[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<SendMailResult | null>(null)
 
@@ -43,11 +56,29 @@ export const ComposeModal = memo(function ComposeModal({ open, initial, onClose,
     setCc(initial.cc ?? '')
     setSubject(initial.subject ?? '')
     setBody(initial.body ?? '')
+    setAttachments([])
+    setAttachError(null)
     setResult(null)
     setSending(false)
   }, [open, initial])
 
   if (!open) return null
+
+  /** 选附件：走主进程 dialog（渲染进程不直接读盘），拿到 base64 后只保留展示所需字段 */
+  const pickAttachments = async (): Promise<void> => {
+    setAttachError(null)
+    try {
+      const picked = await api.pickAttachments()
+      if (!picked || picked.length === 0) return
+      const merged = mergeAttachments(attachments, picked)
+      setAttachments(merged.list)
+      if (merged.error) setAttachError(merged.error)
+    } catch (e) {
+      setAttachError(errorMessage(e))
+    }
+  }
+
+  const totalBytes = totalAttachmentBytes(attachments)
 
   const send = async (): Promise<void> => {
     if (sending) return
@@ -64,6 +95,7 @@ export const ComposeModal = memo(function ComposeModal({ open, initial, onClose,
         cc,
         subject,
         body,
+        attachments: attachments.length > 0 ? attachments : undefined,
         inReplyTo: initial.inReplyTo,
         draftId: initial.draftId
       })
@@ -117,10 +149,57 @@ export const ComposeModal = memo(function ComposeModal({ open, initial, onClose,
             {result.conclusion}
           </div>
         )}
+        <div className="compose-attach" data-testid="compose-attach-area">
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => void pickAttachments()}
+            disabled={sending}
+            data-testid="compose-add-attachment"
+          >
+            📎 添加附件
+          </button>
+          <span className="hint">
+            {attachments.length > 0
+              ? `已选 ${attachments.length} 个（${formatAttachmentSize(totalBytes)} / 上限 20MB）`
+              : '最多 10 个，合计不超过 20MB'}
+          </span>
+          {attachError && (
+            <span className="compose-attach-err" data-testid="compose-attach-error">
+              {attachError}
+            </span>
+          )}
+          {attachments.length > 0 && (
+            <ul className="compose-attach-list" data-testid="compose-attach-list">
+              {attachments.map((a, i) => (
+                <li key={`${a.filename}:${a.size}`} data-testid="compose-attach-item">
+                  <span className="name" title={a.filename}>
+                    {a.filename}
+                  </span>
+                  <span className="size">{formatAttachmentSize(a.size)}</span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    disabled={sending}
+                    data-testid="compose-attach-remove"
+                  >
+                    移除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {attachments.length > 0 && initial.draftId !== undefined && (
+            <div className="hint" data-testid="compose-draft-attach-hint">
+              ⚠️ 草稿暂不保存附件：保存草稿后附件会被丢弃，请直接发送。
+            </div>
+          )}
+        </div>
         <div className="compose-foot">
           <span className="hint">收件人只填地址；发送记录会保存在左侧「已发送」。</span>
           <button className="btn primary" onClick={() => void send()} disabled={sending} data-testid="compose-send">
-            {sending ? '发送中…' : '发送'}
+            {sending ? '发送中…' : attachments.length > 0 ? `发送（含 ${attachments.length} 个附件）` : '发送'}
           </button>
         </div>
       </div>

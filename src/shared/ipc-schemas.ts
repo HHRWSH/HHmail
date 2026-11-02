@@ -114,6 +114,23 @@ export const sendTestMailSchema = z
   .optional()
 
 /** 发信参数：收件人支持逗号/分号分隔的多个地址（zod 不做严格 email 校验，逐个地址在 handler 里校验） */
+/** 选择目录（可带默认目录） */
+// 发信附件上限（与 UI、主进程选择器保持一致）：单文件 15MB / 合计 20MB / 最多 10 个
+export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 20 * 1024 * 1024
+export const MAX_ATTACHMENT_COUNT = 10
+
+const attachmentSchema = z
+  .object({
+    filename: z.string().trim().min(1).max(200),
+    contentType: z.string().trim().min(1).max(150),
+    size: z.number().int().nonnegative().max(MAX_ATTACHMENT_BYTES),
+    dataBase64: z.string().min(1).max(Math.ceil(MAX_ATTACHMENT_BYTES * 1.4))
+  })
+  .strict()
+
+/** 选择发信附件（无参数；主进程弹文件选择框） */
+export const pickAttachmentsSchema = z.object({}).strict()
 export const sendMailSchema = z
   .object({
     to: z.string().trim().min(1).max(1000),
@@ -121,7 +138,15 @@ export const sendMailSchema = z
     subject: z.string().max(500).default('(无主题)'),
     body: z.string().max(200_000).default(''),
     inReplyTo: z.string().trim().max(500).optional(),
-    draftId: z.number().int().positive().optional()
+    draftId: z.number().int().positive().optional(),
+    attachments: z
+      .array(attachmentSchema)
+      .max(MAX_ATTACHMENT_COUNT)
+      .optional()
+      .refine(
+        (list) => !list || list.reduce((n, a) => n + a.size, 0) <= MAX_ATTACHMENTS_TOTAL_BYTES,
+        { message: '附件合计大小超过 20MB' }
+      )
   })
   .strict()
 
@@ -311,6 +336,7 @@ export const tagExampleSchema = z
   .strict()
 
 /** 选择目录（可带默认目录） */
+
 export const pickDirectorySchema = z
   .object({ defaultPath: z.string().max(1000).optional() })
   .strict()

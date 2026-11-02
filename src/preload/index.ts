@@ -109,6 +109,8 @@ const api: WindowApi = {
   rebuildTags: (): Promise<number> => invoke(IPC_CHANNELS.TAGS_REBUILD),
   pickDirectory: (defaultPath?: string): Promise<string | null> =>
     invoke(IPC_CHANNELS.SHELL_PICK_DIRECTORY, defaultPath ? { defaultPath } : {}),
+  pickAttachments: (): Promise<import('../shared/types').MailAttachmentPayload[]> =>
+    invoke(IPC_CHANNELS.SHELL_PICK_ATTACHMENTS, {}),
   openPath: (path: string): Promise<void> => invoke(IPC_CHANNELS.SHELL_OPEN_PATH, { path }),
   syncMail: (args?: { folders?: string[] }): Promise<SyncResult> => invoke(IPC_CHANNELS.MAIL_SYNC, args ?? {}),
   onSyncProgress: (cb: (progress: SyncProgress) => void): (() => void) => subscribe(IPC_CHANNELS.MAIL_SYNC_EVENT, cb),

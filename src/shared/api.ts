@@ -18,6 +18,7 @@ import type {
   MailListItem,
   NewMailEvent,
   SavedView,
+  MailAttachmentPayload,
   SendMailArgs,
   SendMailResult,
   SentItem,
@@ -90,6 +91,8 @@ export interface WindowApi {
   rebuildTags(): Promise<number>
   /** 选择目录（设置 → 附件保存位置） */
   pickDirectory(defaultPath?: string): Promise<string | null>
+  /** 选择发信附件：主进程弹文件选择框、读成 base64 返回（渲染进程不直接读盘） */
+  pickAttachments(): Promise<MailAttachmentPayload[]>
   /** 在文件管理器中定位某个文件/目录 */
   openPath(path: string): Promise<void>
   syncMail(args?: { folders?: string[] }): Promise<SyncResult>

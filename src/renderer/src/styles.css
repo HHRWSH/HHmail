@@ -1203,3 +1203,12 @@ body { font-size: var(--app-font-size); }
 .cal-kind.event { background: rgba(59,130,246,0.14); color: #3b82f6; }
 .cal-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-meta { opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 发信附件（V2.3） ---------- */
+.compose-attach { padding: 4px 14px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.compose-attach .hint { font-size: 11px; color: var(--text-3); }
+.compose-attach-err { font-size: 11px; color: #ef4444; }
+.compose-attach-list { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.compose-attach-list li { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; align-items: center; gap: 8px; font-size: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; padding: 4px 8px; }
+.compose-attach-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-attach-list .size { color: var(--text-3); font-variant-numeric: tabular-nums; }

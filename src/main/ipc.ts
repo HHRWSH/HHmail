@@ -21,6 +21,10 @@ import {
   deleteViewSchema,
   attachmentSaveSchema,
   getAttachmentSchema,
+  pickAttachmentsSchema,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
   pickDirectorySchema,
   countMailsSchema,
   listEventsSchema,
@@ -749,7 +753,46 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     })
   )
 
-  /** 选择目录（设置 → 附件保存位置） */
+  /**
+   * 选择发信附件：**主进程**弹文件框并读成 base64（渲染进程不直接读盘，符合 preload 白名单约定）。
+   * 上限与 zod/UI 一致：最多 10 个、单文件 ≤15MB、合计 ≤20MB；超限直接给中文提示，不静默截断。
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.SHELL_PICK_ATTACHMENTS,
+    wrap(ctx, pickAttachmentsSchema, async () => {
+      const picked = await dialog.showOpenDialog({
+        title: `选择附件（最多 ${MAX_ATTACHMENT_COUNT} 个 / 单文件 ≤15MB / 合计 ≤20MB）`,
+        properties: ['openFile', 'multiSelections']
+      })
+      if (picked.canceled || picked.filePaths.length === 0) return []
+      if (picked.filePaths.length > MAX_ATTACHMENT_COUNT) {
+        throw new AppError(ErrorCodes.VALIDATION_FAILED, `一次最多添加 ${MAX_ATTACHMENT_COUNT} 个附件。`)
+      }
+      const out: Array<{ filename: string; contentType: string; size: number; dataBase64: string }> = []
+      let total = 0
+      for (const filePath of picked.filePaths) {
+        const size = fs.statSync(filePath).size
+        if (size > MAX_ATTACHMENT_BYTES) {
+          throw new AppError(
+            ErrorCodes.VALIDATION_FAILED,
+            `附件「${path.basename(filePath)}」超过 15MB，请压缩后再发。`
+          )
+        }
+        total += size
+        if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+          throw new AppError(ErrorCodes.VALIDATION_FAILED, '附件合计超过 20MB，请减少后再添加。')
+        }
+        out.push({
+          filename: path.basename(filePath),
+          contentType: guessContentType(filePath),
+          size,
+          dataBase64: fs.readFileSync(filePath).toString('base64')
+        })
+      }
+      ctx.logger.info('mail.pick_attachments', { count: out.length, totalBytes: total })
+      return out
+    })
+  )
   ipcMain.handle(
     IPC_CHANNELS.SHELL_PICK_DIRECTORY,
     wrap(ctx, pickDirectorySchema, async (args: { defaultPath?: string } | undefined) => {
@@ -1155,6 +1198,38 @@ function sanitizeFilename(name: string): string {
   return cleaned || 'attachment'
 }
 
+/** 按扩展名猜 Content-Type（附件发信用；未知类型走 octet-stream）。 */
+function guessContentType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  const map: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.md': 'text/markdown',
+    '.csv': 'text/csv',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.html': 'text/html',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.zip': 'application/zip',
+    '.rar': 'application/vnd.rar',
+    '.7z': 'application/x-7z-compressed',
+    '.mp4': 'video/mp4',
+    '.mp3': 'audio/mpeg',
+    '.ics': 'text/calendar'
+  }
+  return map[ext] ?? 'application/octet-stream'
+}
 /** 目录内同名文件自动加 (1)(2)…，避免覆盖用户已有文件。 */
 function uniquePath(dir: string, filename: string): string {
   const ext = path.extname(filename)

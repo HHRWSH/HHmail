@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import {
   askInboxSchema,
   bulkLabelSchema,
@@ -238,3 +238,4 @@ describe('IPC 入参 zod 校验（白名单契约，规范 §14.4）', () => {
   })
 
 })
+

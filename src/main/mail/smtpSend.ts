@@ -35,6 +35,8 @@ export interface SmtpSendOptions {
   text: string
   /** 回复时带上原邮件的 Message-ID（写入 In-Reply-To / References，便于会话归并） */
   inReplyTo?: string
+  /** 附件（base64；总大小由上层 zod 校验限制在 20MB 内） */
+  attachments?: MimeAttachment[]
   timeoutMs?: number
 }
 
@@ -81,7 +83,28 @@ export function formatRfc5322Date(d: Date): string {
   )}:${pad(d.getSeconds())} ${sign}${pad(Math.floor(abs / 60))}${pad(abs % 60)}`
 }
 
-/** 组装 MIME 纯文本邮件（纯函数，可单测；正文 base64，主题按需 RFC 2047）。 */
+/** 发信附件（渲染层选好文件后由主进程读成 base64 传入） */
+export interface MimeAttachment {
+  filename: string
+  contentType?: string
+  /** base64（不含 data: 前缀） */
+  dataBase64: string
+}
+
+/**
+ * Content-Disposition 里的文件名：非 ASCII（中文等）用 RFC 2231 的
+ * `filename*=UTF-8''<percent-encoded>`，同时给一个 ASCII 回退名，兼容老客户端。
+ */
+export function encodeAttachmentFilename(filename: string): string {
+  const raw = String(filename ?? '').trim() || 'attachment'
+  // eslint-disable-next-line no-control-regex
+  const ascii = /^[\x20-\x7e]*$/.test(raw)
+  if (ascii) return `filename="${raw.replace(/(["\\])/g, '\\$1')}"`
+  const fallback = raw.replace(/[^\x20-\x7e]/g, '_').replace(/(["\\])/g, '\\$1')
+  return `filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(raw)}`
+}
+
+/** 组装 MIME 邮件（纯函数，可单测）：无附件时与旧版逐字节兼容；有附件时 multipart/mixed。 */
 export function buildMimeMessage(opts: {
   from: string
   fromName?: string
@@ -92,6 +115,8 @@ export function buildMimeMessage(opts: {
   inReplyTo?: string
   date?: Date
   messageId?: string
+  /** 附件（可选）：给了就走 multipart/mixed，正文作为第一个 part */
+  attachments?: MimeAttachment[]
 }): string {
   const fromHeader = opts.fromName ? `${encodeHeaderValue(opts.fromName)} <${opts.from}>` : `<${opts.from}>`
   const id = opts.messageId ?? `<${Date.now()}.${Math.random().toString(36).slice(2)}@mail-ai>`
@@ -99,7 +124,7 @@ export function buildMimeMessage(opts: {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const headers = [
+  const commonHeaders = [
     `From: ${fromHeader}`,
     `To: ${toList.map((a) => `<${a}>`).join(', ')}`,
     ...(opts.cc && opts.cc.length > 0 ? [`Cc: ${opts.cc.map((a) => `<${a}>`).join(', ')}`] : []),
@@ -107,12 +132,45 @@ export function buildMimeMessage(opts: {
     `Date: ${formatRfc5322Date(opts.date ?? new Date())}`,
     `Message-ID: ${id}`,
     ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`, `References: ${opts.inReplyTo}`] : []),
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: base64'
+    'MIME-Version: 1.0'
   ]
-  const body = wrapBase64(Buffer.from(String(opts.text ?? ''), 'utf8').toString('base64'))
-  return `${headers.join('\r\n')}\r\n\r\n${body}`
+  const bodyB64 = wrapBase64(Buffer.from(String(opts.text ?? ''), 'utf8').toString('base64'))
+  const attachments = (opts.attachments ?? []).filter((a) => a && a.dataBase64)
+
+  // 无附件：保持原来的简单结构（与历史版本逐字节一致，避免老收件端行为变化）
+  if (attachments.length === 0) {
+    const headers = [...commonHeaders, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64']
+    return `${headers.join('\r\n')}\r\n\r\n${bodyB64}`
+  }
+
+  // 有附件：multipart/mixed（正文 text/plain + 每个附件一个 part）
+  const boundary = `----=_MailAI_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+  const parts: string[] = []
+  parts.push(
+    [
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      bodyB64
+    ].join('\r\n')
+  )
+  for (const att of attachments) {
+    const ct = (att.contentType ?? 'application/octet-stream').trim() || 'application/octet-stream'
+    const encodedName = encodeAttachmentFilename(att.filename)
+    parts.push(
+      [
+        `--${boundary}`,
+        `Content-Type: ${ct}; name=${encodedName}`,
+        `Content-Disposition: attachment; ${encodedName}`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        wrapBase64(String(att.dataBase64).replace(/\s+/g, ''))
+      ].join('\r\n')
+    )
+  }
+  const headers = [...commonHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`]
+  return `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}\r\n--${boundary}--`
 }
 
 /** 解析 SMTP 应答：返回状态码与（多行）原文。 */
@@ -273,7 +331,8 @@ export async function runSmtpSend(
       cc: opts.cc,
       subject: opts.subject,
       text: opts.text,
-      inReplyTo: opts.inReplyTo
+      inReplyTo: opts.inReplyTo,
+      attachments: opts.attachments
     })
     t.write(`${dotStuff(message)}\r\n.`)
     const sent = parseSmtpReply(await t.readReply())

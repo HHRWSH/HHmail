@@ -175,6 +175,16 @@ export interface SentItem {
   error: string | null
 }
 
+/** 发信附件：主进程选文件后读成 base64 传给渲染层，发信时原样回传 */
+export interface MailAttachmentPayload {
+  filename: string
+  contentType: string
+  /** 原始大小（字节），仅用于界面显示与上限校验 */
+  size: number
+  /** base64（不含 data: 前缀） */
+  dataBase64: string
+}
+
 /** 发信参数（回复/转发/草稿发送/新写共用） */
 export interface SendMailArgs {
   /** 收件人，支持 `a@x.com, b@y.com` 逗号/分号分隔 */
@@ -182,6 +192,8 @@ export interface SendMailArgs {
   cc?: string
   subject: string
   body: string
+  /** 附件（总数 ≤10、单文件 ≤15MB、合计 ≤20MB；主进程 zod 会再校验一次） */
+  attachments?: MailAttachmentPayload[]
   /** 回复时带上原邮件 Message-ID（写入 In-Reply-To / References） */
   inReplyTo?: string
   /** 草稿 id：发送成功后自动删除草稿 */

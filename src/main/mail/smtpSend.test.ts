@@ -4,6 +4,7 @@ import {
   chooseAuthMechanism,
   describeSendResult,
   dotStuff,
+  encodeAttachmentFilename,
   encodeHeaderValue,
   formatRfc5322Date,
   parseSmtpReply,
@@ -84,6 +85,76 @@ describe('smtpSend —— MIME 组装（纯函数）', () => {
 
   it('wrapBase64 折行', () => {
     expect(wrapBase64('a'.repeat(100)).split('\r\n')).toHaveLength(2)
+  })
+})
+
+describe('smtpSend —— 附件（multipart/mixed）', () => {
+  const pdfB64 = Buffer.from('%PDF-1.4 hello').toString('base64')
+
+  it('无附件时结构不变（与历史版本兼容）', () => {
+    const msg = buildMimeMessage({ from: 'a@x.com', to: 'b@y.com', subject: 's', text: 't' })
+    expect(msg).toContain('Content-Type: text/plain; charset=utf-8')
+    expect(msg).not.toContain('multipart/mixed')
+  })
+
+  it('有附件 → multipart/mixed：正文 + 附件各一个 part，附件 base64 可还原', () => {
+    const msg = buildMimeMessage({
+      from: 'a@x.com',
+      to: 'b@y.com',
+      subject: '带附件',
+      text: '见附件',
+      attachments: [{ filename: 'report.pdf', contentType: 'application/pdf', dataBase64: pdfB64 }]
+    })
+    expect(msg).toContain('Content-Type: multipart/mixed; boundary="')
+    expect(msg).toContain('Content-Type: application/pdf')
+    expect(msg).toContain('Content-Disposition: attachment; filename="report.pdf"')
+    // 附件内容还原
+    const attPart = msg.split('Content-Disposition: attachment; filename="report.pdf"')[1]
+    const b64 = attPart.split('\r\n\r\n')[1].split('\r\n--')[0].replace(/\r\n/g, '')
+    expect(Buffer.from(b64, 'base64').toString('utf8')).toBe('%PDF-1.4 hello')
+  })
+
+  it('中文文件名用 RFC 2231 编码，并给出 ASCII 回退名', () => {
+    const msg = buildMimeMessage({
+      from: 'a@x.com',
+      to: 'b@y.com',
+      subject: 's',
+      text: '',
+      attachments: [{ filename: '成绩单 2026.pdf', contentType: 'application/pdf', dataBase64: pdfB64 }]
+    })
+    expect(msg).toContain("filename*=UTF-8''" + encodeURIComponent('成绩单 2026.pdf'))
+    // 回退名：非 ASCII 换成下划线，保证老客户端也能显示
+    expect(msg).toMatch(/filename="[^"]*2026\.pdf"/)
+  })
+
+  it('多附件 + 空正文：正文仍是一个合法 part', () => {
+    const msg = buildMimeMessage({
+      from: 'a@x.com',
+      to: 'b@y.com',
+      subject: 's',
+      text: '',
+      attachments: [
+        { filename: 'a.jpg', contentType: 'image/jpeg', dataBase64: Buffer.from('JPG').toString('base64') },
+        { filename: 'b.bin', dataBase64: Buffer.from('BIN').toString('base64') }
+      ]
+    })
+    expect(msg.match(/^--/gm)?.length).toBeGreaterThanOrEqual(4) // 3 个 part 分隔 + 结束标记
+    expect(msg).toContain('Content-Type: image/jpeg')
+    expect(msg).toContain('application/octet-stream') // 缺省类型
+    expect(msg.trimEnd().endsWith('--')).toBe(true) // 结束边界
+  })
+
+  it('附件内容里的换行已清理、按 76 字符折行', () => {
+    const big = Buffer.alloc(300, 7).toString('base64')
+    const msg = buildMimeMessage({
+      from: 'a@x.com',
+      to: 'b@y.com',
+      subject: 's',
+      text: 'x',
+      attachments: [{ filename: 'x.bin', dataBase64: big.replace(/(.{20})/g, '$1\n') }]
+    })
+    const lines = msg.split('\r\n').filter((l) => l.length > 0 && !l.startsWith('-') && !l.includes(':'))
+    expect(lines.every((l) => l.length <= 76)).toBe(true)
   })
 })
 

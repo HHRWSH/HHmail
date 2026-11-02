@@ -87,6 +87,8 @@ export const IPC_CHANNELS = {
   MAIL_ATTACHMENT_SAVE: 'mail:attachment-save',
   /** 选择目录（设置里指定附件保存位置） */
   SHELL_PICK_DIRECTORY: 'shell:pick-directory',
+  /** 选择发信附件（主进程弹文件框并读成 base64，渲染进程不直接读盘） */
+  SHELL_PICK_ATTACHMENTS: 'shell:pick-attachments',
   /** 在文件管理器中打开某个路径 */
   SHELL_OPEN_PATH: 'shell:open-path',
   /** AI 助手聊天会话（M4：聊天式界面） */

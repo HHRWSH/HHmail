@@ -47,16 +47,25 @@ try {
   };
   delete launchEnv.ELECTRON_RUN_AS_NODE;
   // 环境 GPU 不稳定时 Electron 启动阶段会 FATAL（"GPU process isn't usable. Goodbye."）：
-  // 用 in-process-gpu 规避，并做 3 次启动重试，避免环境抖动被误判成应用回归。
-  const launchArgs = [outMain, "--in-process-gpu", "--disable-gpu-compositing", "--disable-software-rasterizer"];
+  // 用 in-process-gpu 规避，并做多次启动重试，避免环境抖动被误判成应用回归。
+  // 注意：某些 Windows 环境下 `--in-process-gpu` 反而让 Electron 立刻退出（无 stderr），
+  // 所以重试时**先试不带 GPU 参数**，失败后再退回到带参数的组合。
+  const plainArgs = [outMain];
+  const gpuSafeArgs = [outMain, "--in-process-gpu", "--disable-gpu-compositing", "--disable-software-rasterizer"];
+  const attemptArgs = [plainArgs, plainArgs, gpuSafeArgs, gpuSafeArgs];
   let lastError;
-  for (let attempt = 1; attempt <= 3 && !app; attempt++) {
+  for (let attempt = 1; attempt <= attemptArgs.length && !app; attempt++) {
+    const args = attemptArgs[attempt - 1];
     try {
-      app = await electron.launch({ executablePath: electronPath, args: launchArgs, env: launchEnv });
+      app = await electron.launch({ executablePath: electronPath, args, env: launchEnv });
       await app.firstWindow({ timeout: 25000 });
     } catch (e) {
       lastError = e;
-      console.log(`⚠️ Electron 启动尝试 ${attempt}/3 失败：${String(e && e.message).slice(0, 120)}`);
+      console.log(
+        `⚠️ Electron 启动尝试 ${attempt}/${attemptArgs.length} 失败（${args.length > 1 ? "GPU 安全参数" : "默认参数"}）：${String(
+          e && e.message
+        ).slice(0, 120)}`
+      );
       await app?.close().catch(() => {});
       app = undefined;
       await new Promise((r) => setTimeout(r, 2000));
@@ -90,7 +99,8 @@ try {
     // M4 聊天式 AI 助手
     "chatAsk", "chatMessages", "chatSessions", "clearManualTags", "deleteChatSession", "newChatSession", "renameChatSession",
     // V2.2：附件保存到指定目录 + 目录选择/打开 + 自动标签
-    "saveAttachment", "pickDirectory", "openPath",
+    // V2.3：pickAttachments = 发信附件（主进程弹文件框读数）
+    "saveAttachment", "pickDirectory", "pickAttachments", "openPath",
     "tagCounts", "tagExamples", "setTagExample", "rebuildTags", "setMailTagManual",
     // V2.2：红旗 + 真实总数 + 彩色类别
     "setFlagged", "countMails", "listCategories", "categoryCounts", "createCategory", "updateCategory",

@@ -963,6 +963,11 @@ export function createMockBridge(): WindowApi {
       const dir = savedSettings.attachmentDir || 'C:\Users\demo\Downloads'
       return { saved: true, path: `${dir}\${filename}`, filename }
     },
+    async pickAttachments() {
+      // mock：模拟一次文件选择，返回一个 5 字节的文本附件，便于 E2E 验证「添加/移除附件 + 发送」
+      // 注意：渲染进程没有 Node 的 Buffer，这里直接给 base64 字面量（'hello' → aGVsbG8=）
+      return [{ filename: '测试附件.txt', contentType: 'text/plain', size: 5, dataBase64: 'aGVsbG8=' }]
+    },
     async pickDirectory() {
       return savedSettings.attachmentDir || 'C:\Users\demo\Downloads'
     },

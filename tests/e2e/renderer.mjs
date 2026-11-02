@@ -1062,6 +1062,21 @@ try {
   const replyTo = await page.$eval('[data-testid="compose-to"]', (el) => el.value).catch(() => "");
   const replySubject = await page.$eval('[data-testid="compose-subject"]', (el) => el.value).catch(() => "");
   check("回复弹层自动填收件人与 Re: 主题", replyTo.includes("@") && /^Re:/.test(replySubject), `${replyTo} | ${replySubject}`);
+
+  // 发信附件（V2.3）：添加 → 展示名称/大小 → 可移除 → 发送按钮文案带数量
+  await page.click('[data-testid="compose-add-attachment"]');
+  await page.waitForSelector('[data-testid="compose-attach-item"]', { timeout: 5000 }).catch(() => {});
+  const attachItems = await page.locator('[data-testid="compose-attach-item"]').count();
+  const attachText = await page.$eval('[data-testid="compose-attach-list"]', (el) => el.textContent || "").catch(() => "");
+  check("添加附件后列表显示文件名与大小", attachItems === 1 && /测试附件\.txt/.test(attachText), `${attachItems} 项 | ${attachText.trim().slice(0, 40)}`);
+  const sendBtnWithAttach = await page.$eval('[data-testid="compose-send"]', (el) => el.textContent || "").catch(() => "");
+  check("带附件时发送按钮显示数量", /含 1 个附件/.test(sendBtnWithAttach), sendBtnWithAttach.trim());
+  await page.click('[data-testid="compose-attach-remove"]');
+  await page.waitForTimeout(200);
+  check("附件可移除", (await page.locator('[data-testid="compose-attach-item"]').count()) === 0);
+  await page.click('[data-testid="compose-add-attachment"]');
+  await page.waitForSelector('[data-testid="compose-attach-item"]', { timeout: 5000 }).catch(() => {});
+
   await page.click('[data-testid="compose-send"]');
   // 成功 → 弹层自动关闭；失败 → 弹层保留并给出原因（不依赖 toast，避免读到上一步的旧提示）
   await page
