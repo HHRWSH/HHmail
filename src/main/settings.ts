@@ -18,6 +18,9 @@ import {
   DEFAULT_BRAND_SUBTITLE,
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
+  DEFAULT_DND_ENABLED,
+  DEFAULT_DND_START,
+  DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT,
   LEGACY_SUMMARY_PROMPT_HASHES,
   THEME_MODES,
@@ -83,6 +86,9 @@ export const SETTINGS_KEY_ATTACHMENT_DIR = 'mail.attachment_dir'
 export const SETTINGS_KEY_AUTO_TAG = 'tags.auto'
 export const SETTINGS_KEY_TAG_VOCAB = 'tags.vocabulary'
 export const SETTINGS_KEY_SHOW_REMOTE_IMAGES = 'ui.show_remote_images'
+export const SETTINGS_KEY_DND_ENABLED = 'notify.dnd_enabled'
+export const SETTINGS_KEY_DND_START = 'notify.dnd_start'
+export const SETTINGS_KEY_DND_END = 'notify.dnd_end'
 
 const THEMES: readonly string[] = [...THEME_MODES]
 const DENSITIES: readonly string[] = [...UI_DENSITIES]
@@ -217,7 +223,9 @@ export class SafeStorageSettingsStore implements SettingsStore {
       brandName: ((await this.readEnc(SETTINGS_KEY_BRAND_NAME)) ?? '').trim() || DEFAULT_BRAND_NAME,
       brandSubtitle: await this.readBrandSubtitle(),
       listPageSize: pickInt(await this.readEnc(SETTINGS_KEY_LIST_PAGE_SIZE), DEFAULT_LIST_PAGE_SIZE, 5, 200),
-      showRemoteImages: (await this.readEnc(SETTINGS_KEY_SHOW_REMOTE_IMAGES)) === null
+      dndEnabled: (await this.readEnc(SETTINGS_KEY_DND_ENABLED)) === '1',
+      dndStart: ((await this.readEnc(SETTINGS_KEY_DND_START)) ?? DEFAULT_DND_START).trim() || DEFAULT_DND_START,
+      dndEnd: ((await this.readEnc(SETTINGS_KEY_DND_END)) ?? DEFAULT_DND_END).trim() || DEFAULT_DND_END,      showRemoteImages: (await this.readEnc(SETTINGS_KEY_SHOW_REMOTE_IMAGES)) === null
         ? DEFAULT_SHOW_REMOTE_IMAGES
         : (await this.readEnc(SETTINGS_KEY_SHOW_REMOTE_IMAGES)) === '1',
       relativeTime: (await this.readEnc(SETTINGS_KEY_RELATIVE_TIME)) !== '0',
@@ -333,7 +341,15 @@ export class SafeStorageSettingsStore implements SettingsStore {
     if (args.autoTagEnabled !== undefined) {
       await this.writeEnc(SETTINGS_KEY_AUTO_TAG, args.autoTagEnabled ? '1' : '0')
     }
-    if (args.showRemoteImages !== undefined) {
+    if (args.dndEnabled !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_DND_ENABLED, args.dndEnabled ? '1' : '0')
+    }
+    if (args.dndStart !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_DND_START, String(args.dndStart).trim().slice(0, 5))
+    }
+    if (args.dndEnd !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_DND_END, String(args.dndEnd).trim().slice(0, 5))
+    }    if (args.showRemoteImages !== undefined) {
       await this.writeEnc(SETTINGS_KEY_SHOW_REMOTE_IMAGES, args.showRemoteImages ? '1' : '0')
     }
     if (args.tagVocabulary !== undefined) {

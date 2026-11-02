@@ -76,6 +76,7 @@ import { describeProbeResult, probeSmtpAuth } from './mail/smtpProbe'
 import { describeSendResult, sendSmtpMail, type SmtpSendResult } from './mail/smtpSend'
 import { SMTP_HOST, SMTP_PORT } from './config'
 import { shouldNotifyNewMail, buildNotificationBody, buildNotificationTitle } from './notifications'
+import { shouldShowSystemNotification } from '../shared/dnd'
 
 function sendToAllWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -220,7 +221,19 @@ export async function handleNewMails(
   settings: AppSettings,
   opts: { notify?: boolean; reason?: string } = {}
 ): Promise<void> {
-  const notify = opts.notify ?? shouldNotifyNewMail(opts.reason)
+// 统一策略（shared/dnd）：用户手动触发（manual*）静默；免打扰窗口内静默；其余弹系统通知。
+  // 注意：无论弹不弹，下面都会推送 mail:new 事件让界面刷新 —— 免打扰只是"不打扰"，不是"不更新"。
+  const settingsSnapshot = await ctx.settings.get()
+  const notify =
+    opts.notify ??
+    (shouldNotifyNewMail(opts.reason) &&
+      shouldShowSystemNotification({
+        reason: opts.reason,
+        dndEnabled: settingsSnapshot.dndEnabled,
+        dndStart: settingsSnapshot.dndStart,
+        dndEnd: settingsSnapshot.dndEnd,
+        nowMs: Date.now()
+      }))
   const all = await ctx.store.query({ limit: 1000, offset: 0 })
   for (const uid of newUids) {
     const item = all.find((m) => m.uid === uid)

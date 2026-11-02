@@ -728,6 +728,15 @@ try {
   await page.waitForSelector('[data-testid="settings-page"]', { timeout: 5000 });
   // 前面的「AI 总结」已经为第一封生成过索引卡片 → 直接按卡片重算规则标签（不再批量总结，避免覆盖摘要）
   check("设置页有「显示邮件图片」开关", (await page.locator('[data-testid="show-remote-images"]').count()) === 1);
+  // V2.3 免打扰：开关 + 起止时间 + 窗口文案（跨午夜时显示「次日」）
+  check("设置页有免打扰开关", (await page.locator('[data-testid="dnd-enabled"]').count()) === 1);
+  await page.check('[data-testid="dnd-enabled"]');
+  await page.fill('[data-testid="dnd-start"]', '23:00');
+  await page.fill('[data-testid="dnd-end"]', '08:00');
+  await page.waitForTimeout(200);
+  const dndLabel = await page.$eval('[data-testid="dnd-window-label"]', (el) => el.textContent || "").catch(() => "");
+  check("免打扰窗口文案显示跨午夜", dndLabel.includes('次日'), dndLabel.trim());
+  await page.uncheck('[data-testid="dnd-enabled"]');
   check("词表有「恢复默认词表」按钮", (await page.locator('[data-testid="reset-tag-vocab"]').count()) === 1);
   await page.click('[data-testid="reset-tag-vocab"]');
   await page.waitForTimeout(200);

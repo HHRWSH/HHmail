@@ -160,6 +160,10 @@ export const DEFAULT_BRAND_SUBTITLE = '收信只读 · 支持发信 · AI 摘要
 export const DEFAULT_LIST_PAGE_SIZE = 20
 /** 默认显示邮件图片（含远程）；用户可在设置里关掉以拦截跟踪像素 */
 export const DEFAULT_SHOW_REMOTE_IMAGES = true
+/** 免打扰默认：关闭；默认窗口 23:00–08:00（跨午夜） */
+export const DEFAULT_DND_ENABLED = false
+export const DEFAULT_DND_START = '23:00'
+export const DEFAULT_DND_END = '08:00'
 /** 附件保存目录：空串 = 每次弹窗询问（默认，最不打扰） */
 export const DEFAULT_ATTACHMENT_DIR = ''
 /** 自动标签：默认开启（规则标签零成本，AI 标签顺带在摘要调用里产出） */

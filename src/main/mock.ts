@@ -13,6 +13,9 @@ import {
   DEFAULT_BRAND_SUBTITLE,
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
+  DEFAULT_DND_ENABLED,
+  DEFAULT_DND_START,
+  DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT
 } from '../shared/defaults'
 import { DEFAULT_TAG_VOCABULARY } from '../shared/tags'
@@ -253,6 +256,9 @@ export class MockSettingsStore implements SettingsStore {
       brandSubtitle: DEFAULT_BRAND_SUBTITLE,
       listPageSize: DEFAULT_LIST_PAGE_SIZE,
       showRemoteImages: DEFAULT_SHOW_REMOTE_IMAGES,
+      dndEnabled: DEFAULT_DND_ENABLED,
+      dndStart: DEFAULT_DND_START,
+      dndEnd: DEFAULT_DND_END,
       relativeTime: true,
       openMailMarksRead: true,
       syncOnStartup: false,

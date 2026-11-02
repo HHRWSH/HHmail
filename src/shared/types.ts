@@ -352,6 +352,11 @@ export interface AppSettings {
   listPageSize: number
   /** 显示邮件图片（含远程；默认开）。关掉只保留内嵌 data:/cid: 图片，防跟踪像素 */
   showRemoteImages: boolean
+  /** 免打扰：开启后窗口内不弹系统通知（照常同步/计未读/推应用内事件） */
+  dndEnabled: boolean
+  /** 免打扰起止（HH:mm，支持跨午夜） */
+  dndStart: string
+  dndEnd: string
   /** 时间显示：相对时间（3 分钟前）还是绝对时间 */
   relativeTime: boolean
   // —— 行为（V2.2 通用化）——
@@ -422,6 +427,9 @@ export interface SetSettingsArgs {
   /** 列表一次加载多少封（5-200） */
   listPageSize?: number
   showRemoteImages?: boolean
+  dndEnabled?: boolean
+  dndStart?: string
+  dndEnd?: string
   /** 时间显示：相对 / 绝对 */
   relativeTime?: boolean
   /** 打开邮件时本地标记已读 */

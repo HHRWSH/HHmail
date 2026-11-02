@@ -15,11 +15,15 @@ import {
   DEFAULT_BRAND_SUBTITLE,
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
+  DEFAULT_DND_ENABLED,
+  DEFAULT_DND_START,
+  DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT
 } from '@shared/defaults'
 import { DEFAULT_TAG_VOCABULARY, normalizeTag, parseVocabulary } from '@shared/tags'
 import type { MailCategory } from '@shared/types'
 import { AI_PROVIDERS, defaultModelForProvider, providerModels, resolveAiProvider } from '@shared/aiProviders'
+import { formatDndWindow } from '@shared/dnd'
 import { DENSITY_OPTIONS, THEME_OPTIONS } from '@shared/theme'
 import { api } from '../bridge'
 import { errorMessage } from '../lib/errors'
@@ -86,6 +90,9 @@ export const SettingsPage = memo(function SettingsPage({
   const [brandSubtitle, setBrandSubtitle] = useState(DEFAULT_BRAND_SUBTITLE)
   const [listPageSize, setListPageSize] = useState(String(DEFAULT_LIST_PAGE_SIZE))
   const [showRemoteImages, setShowRemoteImages] = useState(DEFAULT_SHOW_REMOTE_IMAGES)
+  const [dndEnabled, setDndEnabled] = useState(DEFAULT_DND_ENABLED)
+  const [dndStart, setDndStart] = useState(DEFAULT_DND_START)
+  const [dndEnd, setDndEnd] = useState(DEFAULT_DND_END)
   const [relativeTime, setRelativeTime] = useState(true)
   const [openMailMarksRead, setOpenMailMarksRead] = useState(true)
   const [syncOnStartup, setSyncOnStartup] = useState(false)
@@ -196,6 +203,9 @@ export const SettingsPage = memo(function SettingsPage({
     setBrandSubtitle(s.brandSubtitle)
     setListPageSize(String(s.listPageSize))
     setShowRemoteImages(s.showRemoteImages)
+    setDndEnabled(s.dndEnabled)
+    setDndStart(s.dndStart)
+    setDndEnd(s.dndEnd)
     setRelativeTime(s.relativeTime)
     setOpenMailMarksRead(s.openMailMarksRead)
     setSyncOnStartup(s.syncOnStartup)
@@ -784,6 +794,41 @@ export const SettingsPage = memo(function SettingsPage({
                   </label>
                   <span className="hint">
                     关掉后只显示邮件自带的内嵌图片，远程图片会被拦截（防跟踪像素）；保存后立即生效
+                  </span>
+                </div>
+              </div>
+              {/* V2.3 免打扰：窗口内不弹系统通知（照常同步/计未读/刷新界面） */}
+              <div className="settings-row">
+                <span className="name">免打扰</span>
+                <div className="row-inline">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={dndEnabled}
+                      onChange={(e) => setDndEnabled(e.target.checked)}
+                      data-testid="dnd-enabled"
+                    />
+                    <span>这段时间内不弹系统通知</span>
+                  </label>
+                  <input
+                    className="settings-input"
+                    type="time"
+                    value={dndStart}
+                    onChange={(e) => setDndStart(e.target.value)}
+                    disabled={!dndEnabled}
+                    data-testid="dnd-start"
+                  />
+                  <span className="hint">至</span>
+                  <input
+                    className="settings-input"
+                    type="time"
+                    value={dndEnd}
+                    onChange={(e) => setDndEnd(e.target.value)}
+                    disabled={!dndEnabled}
+                    data-testid="dnd-end"
+                  />
+                  <span className="hint" data-testid="dnd-window-label">
+                    {dndEnabled ? formatDndWindow(dndStart, dndEnd) : '仅在不勾选时提醒'}
                   </span>
                 </div>
               </div>

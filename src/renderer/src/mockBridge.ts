@@ -242,6 +242,9 @@ export function createMockBridge(): WindowApi {
     listPageSize: DEFAULT_LIST_PAGE_SIZE,
 
     showRemoteImages: true,
+    dndEnabled: false,
+    dndStart: '23:00',
+    dndEnd: '08:00',
     relativeTime: true,
     openMailMarksRead: true,
     syncOnStartup: false,
