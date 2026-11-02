@@ -44,6 +44,8 @@ export interface AppContext {
   /** 原始 MIME → ParsedMessage（供详情页对缺失正文的旧邮件按需回填） */
   parse: (raw: Buffer, uid: number, flags: string[]) => Promise<ParsedMessage>
   shutdown: () => Promise<void>
+  /** 未读数变化后刷新任务栏角标/托盘提示（由 index.ts 注入） */
+  refreshUnreadBadge?: () => void
 }
 
 export interface BootstrapDeps {

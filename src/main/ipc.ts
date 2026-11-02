@@ -450,6 +450,8 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     wrap(ctx, markReadSchema, async (args: MarkReadArgs) => {
       // 只在本机维护已读/未读，不改服务端标志（规范 §1.1 第 8 条 / §2 第 1 条）
       await ctx.store.markRead(args.id, args.read)
+      // V2.3：未读数变化 → 刷新任务栏角标/托盘提示
+      ctx.refreshUnreadBadge?.()
     })
   )
 
@@ -519,6 +521,7 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     IPC_CHANNELS.MAIL_BULK_READ,
     wrap(ctx, bulkReadSchema, async (args: BulkReadArgs) => {
       await ctx.store.bulkMarkRead(args.ids, args.read)
+      ctx.refreshUnreadBadge?.()
       ctx.logger.info('bulk.read', { count: args.ids.length })
     })
   )
@@ -1140,6 +1143,8 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
       const settings = await ctx.settings.get()
       const folders = args?.folders && args.folders.length > 0 ? args.folders : ['INBOX']
       const result = await ctx.sync.run(emitSync, settings.syncWindow, folders)
+      // V2.3：同步完成后刷新任务栏未读角标/托盘提示
+      ctx.refreshUnreadBadge?.()
       // 新邮件：自动 AI 总结 + Windows 通知（全量首同步不打扰，只处理增量新 UID）
       const newUids = result.newUids.slice(0, 10)
       if (newUids.length > 0) {

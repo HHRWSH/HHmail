@@ -3,13 +3,15 @@
  * contextIsolation: true、nodeIntegration: false、sandbox: true、无 webviewTag。
  * 关闭窗口 → 最小化到托盘后台运行；托盘右键可「显示主窗口 / 退出应用」。
  */
-import { app, BrowserWindow, dialog, Notification, powerMonitor, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, Notification, powerMonitor, safeStorage } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { bootstrap, normalizeDbFileName, type AppContext } from './bootstrap'
 import { FileLogger } from './logger'
 import { registerIpcHandlers, summarizePendingBatch } from './ipc'
 import { rebuildTasksForMessages } from './tasks/rebuild'
+import { createUnreadBadgeController } from './unreadBadge'
+import { badgeIconDataUrl } from './badgeIcon'
 import { repairNoisyBodies } from './db/repair'
 import { createTray, type TrayController } from './tray'
 import { handleNewMails } from './ipc'
@@ -186,6 +188,8 @@ async function applyBrandTitle(context: AppContext): Promise<void> {
     const name = (settings.brandName || DEFAULT_BRAND_NAME).trim() || DEFAULT_BRAND_NAME
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(name)
     tray?.setTooltip(name)
+    // V2.3：品牌名变化后，托盘提示还要带上未读数（refresh 会重新算一遍）
+    context.refreshUnreadBadge?.()
   } catch {
     /* 设置读不到就保持默认标题 */
   }
@@ -278,6 +282,8 @@ async function main(): Promise<void> {
     sync: async (reason) => {
       logger.info('sync.auto.run', { reason })
       const result = await ctx!.sync.run((p) => emitSync(p))
+      // V2.3：后台同步完成后刷新未读角标（新邮件到达/已读状态可能变化）
+      ctx?.refreshUnreadBadge?.()
       // 后台同步发现新邮件时，必须和手动同步走同一套收尾：
       // ① 推 NewMailEvent → 渲染层刷新列表（否则界面看起来「没有自动同步」）
       // ② 弹 Windows 通知（后台到达正是通知该出现的时候）
@@ -414,6 +420,45 @@ async function main(): Promise<void> {
       app.quit()
     }
   })
+
+  // ---------- V2.3 未读角标（Windows 任务栏 overlay + 托盘提示 + macOS dock） ----------
+  {
+    const badge = createUnreadBadgeController({
+      getWindow: () => mainWindow,
+      createIcon: (kind) => nativeImage.createFromDataURL(badgeIconDataUrl(kind)),
+      setTrayTooltip: (text) => {
+        try {
+          tray?.setTooltip(text)
+        } catch {
+          /* 托盘可能已销毁 */
+        }
+      },
+      setAppBadge: (n) => app.setBadgeCount(n),
+      platform: process.platform
+    })
+    const refreshUnreadBadge = (): void => {
+      void (async () => {
+        if (!ctx) return
+        try {
+          const [count, settings] = await Promise.all([
+            ctx.store.countMails({ limit: 0, offset: 0, folder: 'INBOX', unreadOnly: true }),
+            ctx.settings.get()
+          ])
+          badge.refresh(count, settings.brandName)
+        } catch (e) {
+          logger.warn('badge.refresh.failed', { reason: e instanceof Error ? e.message : String(e) })
+        }
+      })()
+    }
+    // 提供给 IPC/同步链路（标记已读、手动同步）调用
+    if (ctx) ctx.refreshUnreadBadge = refreshUnreadBadge
+    // 启动时先算一次
+    refreshUnreadBadge()
+    // 兜底：每 60 秒对齐一次（外部改动/多窗口等边缘场景）
+    const badgeTimer = setInterval(refreshUnreadBadge, 60_000)
+    ;(badgeTimer as unknown as { unref?: () => void }).unref?.()
+    app.on('will-quit', () => clearInterval(badgeTimer))
+  }
 
   // 标题/托盘名跟随设置里的品牌名（用户可改成自己学校的名字）
   void applyBrandTitle(ctx)
