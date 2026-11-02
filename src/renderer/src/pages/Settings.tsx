@@ -16,6 +16,7 @@ import {
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_DND_ENABLED,
+  DEFAULT_AUTO_CHECK_UPDATE,
   DEFAULT_DND_START,
   DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT
@@ -24,6 +25,7 @@ import { DEFAULT_TAG_VOCABULARY, normalizeTag, parseVocabulary } from '@shared/t
 import type { MailCategory } from '@shared/types'
 import { AI_PROVIDERS, defaultModelForProvider, providerModels, resolveAiProvider } from '@shared/aiProviders'
 import { formatDndWindow } from '@shared/dnd'
+import { describeUpdateState, updatePrimaryAction, type UpdateState } from '@shared/update'
 import { DENSITY_OPTIONS, THEME_OPTIONS } from '@shared/theme'
 import { api } from '../bridge'
 import { errorMessage } from '../lib/errors'
@@ -90,6 +92,11 @@ export const SettingsPage = memo(function SettingsPage({
   const [brandSubtitle, setBrandSubtitle] = useState(DEFAULT_BRAND_SUBTITLE)
   const [listPageSize, setListPageSize] = useState(String(DEFAULT_LIST_PAGE_SIZE))
   const [showRemoteImages, setShowRemoteImages] = useState(DEFAULT_SHOW_REMOTE_IMAGES)
+  // V2.3 自动更新：状态由主进程推送（onUpdateState），按钮按状态切换
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const updateAction = updatePrimaryAction(updateState ?? { status: 'idle', currentVersion: '', portable: false })
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState(DEFAULT_AUTO_CHECK_UPDATE)
   const [dndEnabled, setDndEnabled] = useState(DEFAULT_DND_ENABLED)
   const [dndStart, setDndStart] = useState(DEFAULT_DND_START)
   const [dndEnd, setDndEnd] = useState(DEFAULT_DND_END)
@@ -203,6 +210,7 @@ export const SettingsPage = memo(function SettingsPage({
     setBrandSubtitle(s.brandSubtitle)
     setListPageSize(String(s.listPageSize))
     setShowRemoteImages(s.showRemoteImages)
+    setAutoCheckUpdate(s.autoCheckUpdate)
     setDndEnabled(s.dndEnabled)
     setDndStart(s.dndStart)
     setDndEnd(s.dndEnd)
@@ -257,6 +265,55 @@ export const SettingsPage = memo(function SettingsPage({
     },
     [onToast]
   )
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const st = (await api.getUpdateState()) as UpdateState | null
+        if (alive && st) setUpdateState(st)
+      } catch {
+        /* 主进程不支持更新时忽略 */
+      }
+    })()
+    const off = api.onUpdateState((st) => {
+      if (alive) setUpdateState(st)
+    })
+    return () => {
+      alive = false
+      off?.()
+    }
+  }, [])
+
+  const doUpdateCheck = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try {
+      const st = (await api.checkUpdate(true)) as UpdateState | null
+      if (st) setUpdateState(st)
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+  const doUpdateDownload = async (): Promise<void> => {
+    setUpdateBusy(true)
+    try {
+      const st = (await api.downloadUpdate()) as UpdateState | null
+      if (st) setUpdateState(st)
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+  const doUpdateInstall = async (): Promise<void> => {
+    try {
+      await api.installUpdate()
+    } catch (e) {
+      onToast(errorMessage(e))
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -1327,6 +1384,63 @@ export const SettingsPage = memo(function SettingsPage({
                   ↩ 主题/密度/名称恢复默认
                 </button>
               </div>
+              </div>
+              {/* V2.3 自动更新：版本 / 检查 / 下载 / 重启安装；portable 版只提示手动下载 */}
+              <div className="settings-row">
+                <span className="name">版本与更新</span>
+                <div className="row-inline">
+                  <span className="hint" data-testid="update-version">
+                    当前版本 {updateState?.currentVersion ?? '—'}
+                  </span>
+                  <button
+                    className="btn ghost"
+                    onClick={() => void doUpdateCheck()}
+                    disabled={updateBusy || updateState?.status === 'checking'}
+                    data-testid="check-update"
+                  >
+                    {updateBusy || updateState?.status === 'checking' ? '检查中…' : '检查更新'}
+                  </button>
+                  {updateAction.kind === 'download' && (
+                    <button className="btn primary" onClick={() => void doUpdateDownload()} disabled={updateBusy} data-testid="download-update">
+                      {updateAction.label}
+                    </button>
+                  )}
+                  {updateAction.kind === 'install' && (
+                    <button className="btn primary" onClick={() => void doUpdateInstall()} disabled={updateBusy} data-testid="install-update">
+                      {updateAction.label}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="settings-row">
+                <span className="name" />
+                <div className="row-inline">
+                  <span className="hint" data-testid="update-status">
+                    {updateState ? describeUpdateState(updateState) : '尚未检查'}
+                  </span>
+                  {typeof updateState?.progress === 'number' && updateState.status === 'downloading' && (
+                    <progress value={updateState.progress} max={100} data-testid="update-progress" />
+                  )}
+                </div>
+              </div>
+              <div className="settings-row">
+                <span className="name">启动自动检查</span>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={autoCheckUpdate}
+                    onChange={(e) => setAutoCheckUpdate(e.target.checked)}
+                    data-testid="auto-check-update"
+                  />
+                  <span>启动 30 秒后自动检查更新（不自动下载安装）</span>
+                </label>
+              </div>
+              <div className="settings-row">
+                <span className="name" />
+                <span className="hint">
+                  安装版（NSIS）支持自动更新；便携版（portable）只能手动下载新版覆盖。本构建未做代码签名，
+                  Windows 首次运行可能出现 SmartScreen 提示，属正常现象。
+                </span>
               </div>
             </div>
           )}

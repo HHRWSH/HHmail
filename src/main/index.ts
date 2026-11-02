@@ -11,15 +11,17 @@ import { FileLogger } from './logger'
 import { registerIpcHandlers, summarizePendingBatch } from './ipc'
 import { rebuildTasksForMessages } from './tasks/rebuild'
 import { createUnreadBadgeController } from './unreadBadge'
+import { createUpdateController } from './update'
+import { createRuntimeUpdater } from './updateRuntime'
 import { badgeIconDataUrl } from './badgeIcon'
 import { repairNoisyBodies } from './db/repair'
 import { createTray, type TrayController } from './tray'
 import { handleNewMails } from './ipc'
 import { startSnoozeScheduler, type SnoozeSchedulerHandle } from './mail/snoozeScheduler'
 import { createAutoSyncScheduler, type AutoSyncScheduler } from './mail/autoSync'
-import { IPC_CHANNELS } from '../shared/ipc-contract'
 import type { DeviceCodeEvent, SyncProgress } from '../shared/types'
 import { DEFAULT_BRAND_NAME } from '../shared/defaults'
+import { IPC_CHANNELS } from '../shared/ipc-contract'
 
 /**
  * GPU 安全模式：某些机器/远程会话下 GPU 进程会反复崩溃（Electron 报
@@ -458,6 +460,47 @@ async function main(): Promise<void> {
     const badgeTimer = setInterval(refreshUnreadBadge, 60_000)
     ;(badgeTimer as unknown as { unref?: () => void }).unref?.()
     app.on('will-quit', () => clearInterval(badgeTimer))
+  }
+
+  // ---------- V2.3 自动更新（electron-updater）：只检查不自动下载，用户点按钮才下载/安装 ----------
+  {
+    const updater = createRuntimeUpdater({ isPackaged: app.isPackaged, logger })
+    const controller = createUpdateController({
+      appVersion: app.getVersion(),
+      getUpdater: () => updater,
+      emit: (state) => {
+        try {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.UPDATE_STATE, state)
+        } catch {
+          /* 窗口可能已关闭 */
+        }
+      },
+      logger
+    })
+    controller.attach()
+    if (ctx) {
+      ctx.update = {
+        getState: () => controller.getState(),
+        check: (manual) => controller.check(manual),
+        download: () => controller.download(),
+        install: () => controller.install()
+      }
+    }
+    // 启动 30 秒后自动检查一次（只在安装版 + 设置开启时；失败只记日志）
+    const startupTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          if (!app.isPackaged || !ctx) return
+          const settings = await ctx.settings.get()
+          if (!settings.autoCheckUpdate) return
+          await controller.check(false)
+        } catch (e) {
+          logger.warn('update.startup_check.failed', { reason: e instanceof Error ? e.message : String(e) })
+        }
+      })()
+    }, 30_000)
+    ;(startupTimer as unknown as { unref?: () => void }).unref?.()
+    app.on('will-quit', () => clearTimeout(startupTimer))
   }
 
   // 标题/托盘名跟随设置里的品牌名（用户可改成自己学校的名字）

@@ -746,6 +746,23 @@ try {
   const dndLabel = await page.$eval('[data-testid="dnd-window-label"]', (el) => el.textContent || "").catch(() => "");
   check("免打扰窗口文案显示跨午夜", dndLabel.includes('次日'), dndLabel.trim());
   await page.uncheck('[data-testid="dnd-enabled"]');
+  // V2.3 自动更新：版本号 / 检查更新 / 发现新版本后可下载 / 下载完成可安装（在「关于与数据」分区）
+  await page.click('[data-testid="settings-section-about"]')
+  await page.waitForTimeout(300)
+  check("设置页显示当前版本", (await page.locator('[data-testid="update-version"]').count()) === 1);
+  check("设置页有检查更新按钮", (await page.locator('[data-testid="check-update"]').count()) === 1);
+  await page.click('[data-testid="check-update"]');
+  await page.waitForSelector('[data-testid="download-update"]', { timeout: 8000 }).catch(() => null);
+  check("检查更新后发现新版本（出现下载按钮）", (await page.locator('[data-testid="download-update"]').count()) === 1);
+  const updateStatusText = await page.$eval('[data-testid="update-status"]', (el) => el.textContent || '').catch(() => '');
+  check("更新状态文案带版本号", /1\.2\.0|下载|最新/.test(updateStatusText), updateStatusText.trim());
+  await page.click('[data-testid="download-update"]');
+  await page.waitForSelector('[data-testid="install-update"]', { timeout: 8000 }).catch(() => null);
+  check("下载完成后出现「重启并安装」", (await page.locator('[data-testid="install-update"]').count()) === 1);
+  check("设置页有启动自动检查开关", (await page.locator('[data-testid="auto-check-update"]').count()) === 1);
+  // 回到 AI 分区继续验证标签词表（设置页一次只渲染一个分区）
+  await page.click('[data-testid="settings-section-ai"]')
+  await page.waitForTimeout(300)
   check("词表有「恢复默认词表」按钮", (await page.locator('[data-testid="reset-tag-vocab"]').count()) === 1);
   await page.click('[data-testid="reset-tag-vocab"]');
   await page.waitForTimeout(200);

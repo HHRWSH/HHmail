@@ -29,6 +29,8 @@ import {
   countMailsSchema,
   listEventsSchema,
   unsubscribeSchema,
+  updateEmptySchema,
+  updateCheckSchema,
   taskCreateSchema,
   taskUpdateSchema,
   taskIdSchema,
@@ -454,6 +456,32 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
       await ctx.store.markRead(args.id, args.read)
       // V2.3：未读数变化 → 刷新任务栏角标/托盘提示
       ctx.refreshUnreadBadge?.()
+    })
+  )
+
+  // ---- 自动更新（V2.3）：状态读取 / 检查 / 下载 / 安装 ----
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_GET_STATE,
+    wrap(ctx, updateEmptySchema, async () => ctx.update?.getState() ?? null)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_CHECK,
+    wrap(ctx, updateCheckSchema, async (args: { manual?: boolean }) => {
+      const state = await ctx.update?.check(args?.manual === true)
+      return state ?? null
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_DOWNLOAD,
+    wrap(ctx, updateEmptySchema, async () => (await ctx.update?.download()) ?? null)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_INSTALL,
+    wrap(ctx, updateEmptySchema, async () => {
+      ctx.update?.install()
     })
   )
 

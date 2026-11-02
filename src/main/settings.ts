@@ -19,6 +19,7 @@ import {
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_DND_ENABLED,
+  DEFAULT_AUTO_CHECK_UPDATE,
   DEFAULT_DND_START,
   DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT,
@@ -87,6 +88,7 @@ export const SETTINGS_KEY_AUTO_TAG = 'tags.auto'
 export const SETTINGS_KEY_TAG_VOCAB = 'tags.vocabulary'
 export const SETTINGS_KEY_SHOW_REMOTE_IMAGES = 'ui.show_remote_images'
 export const SETTINGS_KEY_DND_ENABLED = 'notify.dnd_enabled'
+export const SETTINGS_KEY_AUTO_CHECK_UPDATE = 'update.auto_check'
 export const SETTINGS_KEY_DND_START = 'notify.dnd_start'
 export const SETTINGS_KEY_DND_END = 'notify.dnd_end'
 
@@ -223,6 +225,10 @@ export class SafeStorageSettingsStore implements SettingsStore {
       brandName: ((await this.readEnc(SETTINGS_KEY_BRAND_NAME)) ?? '').trim() || DEFAULT_BRAND_NAME,
       brandSubtitle: await this.readBrandSubtitle(),
       listPageSize: pickInt(await this.readEnc(SETTINGS_KEY_LIST_PAGE_SIZE), DEFAULT_LIST_PAGE_SIZE, 5, 200),
+      autoCheckUpdate:
+        (await this.readEnc(SETTINGS_KEY_AUTO_CHECK_UPDATE)) === null
+          ? DEFAULT_AUTO_CHECK_UPDATE
+          : (await this.readEnc(SETTINGS_KEY_AUTO_CHECK_UPDATE)) === '1',
       dndEnabled: (await this.readEnc(SETTINGS_KEY_DND_ENABLED)) === '1',
       dndStart: ((await this.readEnc(SETTINGS_KEY_DND_START)) ?? DEFAULT_DND_START).trim() || DEFAULT_DND_START,
       dndEnd: ((await this.readEnc(SETTINGS_KEY_DND_END)) ?? DEFAULT_DND_END).trim() || DEFAULT_DND_END,      showRemoteImages: (await this.readEnc(SETTINGS_KEY_SHOW_REMOTE_IMAGES)) === null
@@ -340,6 +346,9 @@ export class SafeStorageSettingsStore implements SettingsStore {
     }
     if (args.autoTagEnabled !== undefined) {
       await this.writeEnc(SETTINGS_KEY_AUTO_TAG, args.autoTagEnabled ? '1' : '0')
+    }
+    if (args.autoCheckUpdate !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_AUTO_CHECK_UPDATE, args.autoCheckUpdate ? '1' : '0')
     }
     if (args.dndEnabled !== undefined) {
       await this.writeEnc(SETTINGS_KEY_DND_ENABLED, args.dndEnabled ? '1' : '0')

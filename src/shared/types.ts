@@ -357,6 +357,8 @@ export interface AppSettings {
   listPageSize: number
   /** 显示邮件图片（含远程；默认开）。关掉只保留内嵌 data:/cid: 图片，防跟踪像素 */
   showRemoteImages: boolean
+  /** 启动后自动检查更新（只检查，不自动下载安装） */
+  autoCheckUpdate: boolean
   /** 免打扰：开启后窗口内不弹系统通知（照常同步/计未读/推应用内事件） */
   dndEnabled: boolean
   /** 免打扰起止（HH:mm，支持跨午夜） */
@@ -432,6 +434,7 @@ export interface SetSettingsArgs {
   /** 列表一次加载多少封（5-200） */
   listPageSize?: number
   showRemoteImages?: boolean
+  autoCheckUpdate?: boolean
   dndEnabled?: boolean
   dndStart?: string
   dndEnd?: string

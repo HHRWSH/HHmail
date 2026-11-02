@@ -38,6 +38,7 @@ export const FALLBACK_SETTINGS: AppSettings = {
   listPageSize: DEFAULT_LIST_PAGE_SIZE,
 
   showRemoteImages: true,
+  autoCheckUpdate: true,
   dndEnabled: false,
   dndStart: '23:00',
   dndEnd: '08:00',

@@ -74,6 +74,12 @@ export const IPC_CHANNELS = {
   MAIL_COUNT: 'mail:count',
   /** 日历：某时间范围内的事件（截止 + 卡片里提到的日期） */
   MAIL_LIST_EVENTS: 'mail:list-events',
+  /** 自动更新（V2.3）：状态推送 + 手动检查/下载/安装 */
+  UPDATE_STATE: 'update:state',
+  UPDATE_GET_STATE: 'update:get-state',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_DOWNLOAD: 'update:download',
+  UPDATE_INSTALL: 'update:install',
   /** 一键退订（V2.3）：按 List-Unsubscribe 头发起退订（https 一键 / https 打开浏览器 / mailto 发信） */
   MAIL_UNSUBSCRIBE: 'mail:unsubscribe',
   /** 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 */

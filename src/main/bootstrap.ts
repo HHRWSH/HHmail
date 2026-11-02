@@ -46,6 +46,13 @@ export interface AppContext {
   shutdown: () => Promise<void>
   /** 未读数变化后刷新任务栏角标/托盘提示（由 index.ts 注入） */
   refreshUnreadBadge?: () => void
+  /** 自动更新控制器（由 index.ts 注入；未打包/开发模式为 undefined） */
+  update?: {
+    getState: () => import('../shared/update').UpdateState
+    check: (manual?: boolean) => Promise<import('../shared/update').UpdateState>
+    download: () => Promise<import('../shared/update').UpdateState>
+    install: () => void
+  }
 }
 
 export interface BootstrapDeps {

@@ -30,6 +30,7 @@
     "axios": "^1.7.9",
     "better-sqlite3": "^12.4.1",
     "dompurify": "^3.2.4",
+    "electron-updater": "^6.8.11",
     "imapflow": "^1.0.174",
     "mailparser": "^3.7.2",
     "openai": "^4.88.0",
@@ -79,6 +80,14 @@
       "allowToChangeInstallationDirectory": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "HHRWSH",
+        "repo": "HHmail",
+        "releaseType": "release"
+      }
+    ],
     "electronDist": ".electron-cache",
     "mac": {
       "icon": "resources/icon.png",

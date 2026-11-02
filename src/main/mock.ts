@@ -14,6 +14,7 @@ import {
   DEFAULT_LIST_PAGE_SIZE,
   DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_DND_ENABLED,
+  DEFAULT_AUTO_CHECK_UPDATE,
   DEFAULT_DND_START,
   DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT
@@ -256,6 +257,7 @@ export class MockSettingsStore implements SettingsStore {
       brandSubtitle: DEFAULT_BRAND_SUBTITLE,
       listPageSize: DEFAULT_LIST_PAGE_SIZE,
       showRemoteImages: DEFAULT_SHOW_REMOTE_IMAGES,
+      autoCheckUpdate: DEFAULT_AUTO_CHECK_UPDATE,
       dndEnabled: DEFAULT_DND_ENABLED,
       dndStart: DEFAULT_DND_START,
       dndEnd: DEFAULT_DND_END,

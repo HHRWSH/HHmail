@@ -161,6 +161,8 @@ export const DEFAULT_LIST_PAGE_SIZE = 20
 /** 默认显示邮件图片（含远程）；用户可在设置里关掉以拦截跟踪像素 */
 export const DEFAULT_SHOW_REMOTE_IMAGES = true
 /** 免打扰默认：关闭；默认窗口 23:00–08:00（跨午夜） */
+/** 启动后是否自动检查更新（默认开；只检查不自动下载） */
+export const DEFAULT_AUTO_CHECK_UPDATE = true
 export const DEFAULT_DND_ENABLED = false
 export const DEFAULT_DND_START = '23:00'
 export const DEFAULT_DND_END = '08:00'

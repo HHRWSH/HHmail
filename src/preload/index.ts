@@ -99,6 +99,20 @@ const api: WindowApi = {
   /** 日历：取某时间范围内的事件（截止 + 卡片里的日期） */
   listEvents: (args: { from: number; to: number }): Promise<import('../shared/calendar').CalendarEvent[]> =>
     invoke(IPC_CHANNELS.MAIL_LIST_EVENTS, args),
+  /** 自动更新（V2.3）：状态推送 + 手动操作（不接受渲染层传 URL） */
+  getUpdateState: (): Promise<import('../shared/update').UpdateState> => invoke(IPC_CHANNELS.UPDATE_GET_STATE, {}),
+  checkUpdate: (manual?: boolean): Promise<import('../shared/update').UpdateState> =>
+    invoke(IPC_CHANNELS.UPDATE_CHECK, manual === undefined ? {} : { manual }),
+  downloadUpdate: (): Promise<import('../shared/update').UpdateState> => invoke(IPC_CHANNELS.UPDATE_DOWNLOAD, {}),
+  installUpdate: (): Promise<void> => invoke(IPC_CHANNELS.UPDATE_INSTALL, {}),
+  onUpdateState: (cb: (state: import('../shared/update').UpdateState) => void): (() => boolean) => {
+    const handler = (_e: unknown, state: unknown): void => cb(state as import('../shared/update').UpdateState)
+    ipcRenderer.on(IPC_CHANNELS.UPDATE_STATE, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_STATE, handler)
+      return true
+    }
+  },
   /** 一键退订（V2.3） */
   unsubscribe: (id: number): Promise<{ ok: boolean; kind: string; detail: string }> =>
     invoke(IPC_CHANNELS.MAIL_UNSUBSCRIBE, { id }),

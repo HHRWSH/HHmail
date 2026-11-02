@@ -77,6 +77,11 @@ export const listEventsSchema = z
   })
   .strict()
 
+/** 自动更新：无参数（检查/下载/安装都不接受渲染层传入的 URL） */
+export const updateEmptySchema = z.object({}).strict()
+
+export const updateCheckSchema = z.object({ manual: z.boolean().optional() }).strict()
+
 /** 一键退订：只按邮件 id 发起（地址从邮件头解析，渲染层不能自定义 URL） */
 export const unsubscribeSchema = z.object({ id: z.number().int().positive() }).strict()
 
