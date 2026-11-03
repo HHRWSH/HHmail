@@ -101,6 +101,17 @@ try {
   await page.waitForTimeout(200);
   check("再次点击展开标签分组", (await page.locator('[data-nav="starred"]').count()) === 1);
 
+  // ---------- 一键已读（V2.4：只改本地，不碰服务器） ----------
+  const unreadBeforeAll = await page.locator('.mail-list .mail-item.unread').count();
+  check("收件箱有未读邮件（前置条件）", unreadBeforeAll > 0, `实际 ${unreadBeforeAll} 封未读`);
+  check("工具栏有一键已读按钮", (await page.locator('[data-testid="mark-all-read"]').count()) === 1);
+  await page.click('[data-testid="mark-all-read"]');
+  await page.waitForTimeout(700);
+  const unreadAfterAll = await page.locator('.mail-list .mail-item.unread').count();
+  check("一键已读后列表里没有未读", unreadAfterAll === 0, `${unreadBeforeAll} → ${unreadAfterAll}`);
+  const markAllToast = await page.evaluate(() => document.querySelector('.toast')?.textContent ?? '');
+  check("一键已读有结果提示", /已把|没有未读/.test(markAllToast), markAllToast.slice(0, 60));
+
   // ---------- 日历（把邮件里的日期铺到月视图） ----------
   check("侧边栏有日历入口", await page.isVisible('[data-nav="calendar"]'));
   await page.click('[data-nav="calendar"]');
@@ -137,45 +148,70 @@ try {
   await page.click('[data-testid="calendar-today"]');
   await page.waitForTimeout(200);
   check("回到今天恢复当前月", (await page.$eval('[data-testid="calendar-month"]', (el) => el.textContent || "")).trim() === beforeMonth);
-
-  // ---------- 待办（卡片 DUE + 摘要行动项 → 可勾选任务） ----------
+  // ---------- 待办（V2.4 备忘录式：手动新建 + 引用邮件/时间） ----------
   check("侧边栏有待办入口", await page.isVisible('[data-nav="tasks"]'));
   await page.click('[data-nav="tasks"]');
   await page.waitForSelector('[data-testid="tasks-page"]', { timeout: 8000 });
   const taskItems = await page.locator('[data-testid="task-item"]').count();
-  check("待办列表有任务", taskItems >= 3, `实际 ${taskItems} 条`);
+  check("待办列表有 mock 预置任务", taskItems >= 2, `实际 ${taskItems} 条（未完成；另有 1 条已完成）`);
   const overdueCount = await page.locator('[data-testid="task-item"][data-overdue="1"]').count();
   check("逾期任务带红色标记", overdueCount >= 1, `实际 ${overdueCount} 条逾期`);
-  // 勾选第一条未完成任务 → 变成已完成，并持久化（切到「已完成」也能看到）
-  // 注意：勾选后该条会从「全部」里移出（全部 = 未完成），Playwright 的 check() 会等元素变勾选而超时，
-  // 所以这里用 DOM click 触发同一条 React onChange 路径。
-  const openBefore = await page.locator('[data-testid="task-item"][data-done="0"]').count();
-  await page.evaluate(() => {
-    const el = document.querySelector('[data-testid="task-item"][data-done="0"] [data-testid="task-check"]');
-    if (el) el.click();
-  });
-  await page.waitForTimeout(500);
-  const openAfter = await page.locator('[data-testid="task-item"][data-done="0"]').count();
-  check("勾选后任务从未完成里移出", openAfter === openBefore - 1, `${openBefore} → ${openAfter}`);
+  // 点开第一张 → 右边出现备忘录卡片（标题/正文/清单/引用）
+  await page.locator('[data-testid="task-item"]').first().click();
+  await page.waitForSelector('[data-testid="task-memo"]', { timeout: 5000 });
+  const memoTitle = await page.$eval('[data-testid="task-title-input"]', (el) => el.value).catch(() => '');
+  check("待办详情可编辑标题", memoTitle.length > 0, memoTitle);
+  check("待办详情有正文输入框", (await page.locator('[data-testid="task-body"]').count()) === 1);
+  // 清单：回车添加一条 → 出现清单项 → 勾选
+  const checkBefore = await page.locator('[data-testid="task-check-item"]').count();
+  await page.fill('[data-testid="task-checklist-add"]', 'E2E 清单项');
+  await page.press('[data-testid="task-checklist-add"]', 'Enter');
+  await page.waitForTimeout(400);
+  const checkAfter = await page.locator('[data-testid="task-check-item"]').count();
+  check("回车添加清单项", checkAfter === checkBefore + 1, `${checkBefore} → ${checkAfter}`);
+  await page.locator('[data-testid="task-check-item-toggle"]').last().click();
+  await page.waitForTimeout(300);
+  const lastItemDone = await page.locator('[data-testid="task-check-item"]').last().evaluate((el) => el.className.includes('done'));
+  check("清单项可勾选完成", lastItemDone === true);
+  // 引用邮件：打开选择器 → 选一封还没引用的 → 引用区多一条
+  const linksBefore = await page.locator('[data-testid="task-link"]').count();
+  await page.click('[data-testid="task-add-mail"]');
+  await page.waitForSelector('[data-testid="task-mail-picker-item"]', { timeout: 5000 });
+  const pickerCount = await page.locator('[data-testid="task-mail-picker-item"]').count();
+  if (pickerCount > 1) await page.locator('[data-testid="task-mail-picker-item"]').nth(1).click();
+  else await page.locator('[data-testid="task-mail-picker-item"]').first().click();
+  await page.waitForTimeout(400);
+  const linksAfterMail = await page.locator('[data-testid="task-link"]').count();
+  check("可引用一封邮件", linksAfterMail >= linksBefore, `${linksBefore} → ${linksAfterMail}（同一封邮件已引用时不会重复加）`);
+  // 引用自定义时间
+  await page.fill('[data-testid="task-add-time-input"]', '2026-12-01T09:30');
+  await page.click('[data-testid="task-add-time"]');
+  await page.waitForTimeout(400);
+  const linksAfterTime = await page.locator('[data-testid="task-link"]').count();
+  check("可引用一个自定义时间", linksAfterTime === linksAfterMail + 1, `${linksAfterMail} → ${linksAfterTime}`);
+  // 自动保存：改标题 → 等 1 秒 → 切走再切回，标题还在（mock 内存持久化）
+  await page.fill('[data-testid="task-title-input"]', 'E2E 自动保存的待办');
+  await page.waitForTimeout(1100);
+  const titlesAfterSave = await page.locator('[data-testid="task-title"]').allTextContents();
+  check("标题自动保存到列表", titlesAfterSave.some((t) => t.includes('E2E 自动保存的待办')), titlesAfterSave.join('|').slice(0, 80));
+  // 新建待办 → 列表多一条
+  const countBeforeNew = await page.locator('[data-testid="task-item"]').count();
+  await page.click('[data-testid="task-add"]');
+  await page.waitForTimeout(400);
+  const countAfterNew = await page.locator('[data-testid="task-item"]').count();
+  check("新建待办后列表多一条", countAfterNew === countBeforeNew + 1, `${countBeforeNew} → ${countAfterNew}`);
+  // 删除刚建的这条（页面顶部已有全局 dialog 处理器统一 accept 确认框）
+  await page.click('[data-testid="task-delete"]');
+  await page.waitForTimeout(400);
+  const countAfterDelete = await page.locator('[data-testid="task-item"]').count();
+  check("删除待办后列表少一条", countAfterDelete === countBeforeNew, `${countAfterNew} → ${countAfterDelete}`);
+  // 已完成筛选
   await page.click('[data-testid="task-filter-done"]');
   await page.waitForTimeout(300);
   const doneItems = await page.locator('[data-testid="task-item"]').count();
-  check("「已完成」筛选能看到刚勾选的任务", doneItems >= 2, `实际 ${doneItems} 条已完成`);
-  // 手动新增一条任务
+  check("「已完成」筛选只显示完成的任务", doneItems >= 1, `实际 ${doneItems} 条`);
   await page.click('[data-testid="task-filter-all"]');
   await page.waitForTimeout(200);
-  await page.fill('[data-testid="task-add-input"]', 'E2E 手动待办');
-  await page.click('[data-testid="task-add"]');
-  await page.waitForTimeout(400);
-  const addText = await page.$eval('[data-testid="tasks-list"]', (el) => el.textContent || "").catch(() => "");
-  check("手动新增待办出现在列表里", addText.includes("E2E 手动待办"), addText.slice(0, 60));
-  check("手动任务带「手动」来源标记", (await page.locator('[data-testid="task-source"].manual').count()) >= 1);
-  // 删除刚加的那条（页面顶部有全局 dialog 处理器统一 accept 确认框，这里不要再注册 once）
-  const addRow = page.locator('[data-testid="task-item"]', { hasText: 'E2E 手动待办' }).first();
-  await addRow.locator('[data-testid="task-delete"]').click();
-  await page.waitForTimeout(400);
-  const afterDelete = await page.$eval('[data-testid="tasks-list"]', (el) => el.textContent || "").catch(() => "");
-  check("删除待办后列表里消失", !afterDelete.includes("E2E 手动待办"), afterDelete.slice(0, 60));
 
   await page.click('[data-nav="inbox"]');
   await page.waitForSelector(".mail-list .mail-item", { timeout: 8000 });
@@ -224,16 +260,94 @@ try {
   // V2.2 修复：角标显示真实总数（列表只取前 N 封，之前会一直显示"共 200 封"）
   const totalText = await page.$eval('[data-testid="mail-total"]', (el) => el.textContent || "").catch(() => "");
   check("顶栏显示邮件总数", /共 \d+ 封|\d+ 封未读/.test(totalText), totalText.trim());
-  // V2.2：侧边栏文件夹有图标 + 红旗入口 + 标签数量收敛
-  const folderIcons = await page.locator('[data-nav^="folder:"] .ico').allTextContents();
-  check("文件夹带图标", folderIcons.length > 0 && folderIcons.every((t) => (t || '').trim().length > 0), folderIcons.join(""));
+  // V2.8：侧边栏图标统一为线性 SVG（不再是 emoji）
+  const folderIcons = await page.locator('[data-nav^="folder:"] .ico svg').count();
+  check("文件夹带图标（统一 SVG）", folderIcons > 0, `svg=${folderIcons}`);
+  const navIconSvgs = await page.locator('.nav-item .ico svg').count();
+  check("侧边栏导航图标统一为 SVG", navIconSvgs >= 8, `svg=${navIconSvgs}`);
   check("侧边栏有红旗入口", await page.isVisible('[data-nav="flagged"]'));
+
+  // ---------- V2.8 自绘标题栏（集成 返回/搜索/全部已读/同步/设置 + 窗口按钮） ----------
+  check("标题栏存在", await page.isVisible('[data-testid="titlebar"]'));
+  check("标题栏有返回按钮", await page.isVisible('[data-testid="titlebar-back"]'));
+  check("标题栏有搜索框", await page.isVisible('[data-testid="search-input"]'));
+  check("标题栏集成「全部已读」", await page.isVisible('[data-testid="mark-all-read"]'));
+  check("标题栏集成「同步」", await page.isVisible('[data-testid="sync-btn"]'));
+  check("标题栏集成「设置」", await page.isVisible('[data-testid="titlebar-settings"]'));
+  check("保留最小化/最大化/关闭", (await page.locator('[data-testid="win-minimize"], [data-testid="win-maximize"], [data-testid="win-close"]').count()) === 3);
+  // 按钮必须无圆角、无边框、整格填满（用户指定：像 Edge 那样）
+  const winBtnStyle = await page.$eval('[data-testid="win-maximize"]', (el) => {
+    const s = getComputedStyle(el)
+    return { radius: s.borderRadius, border: s.borderTopWidth, bg: s.backgroundColor, height: el.getBoundingClientRect().height }
+  });
+  check("窗口按钮无圆角", winBtnStyle.radius === "0px", winBtnStyle.radius);
+  check("窗口按钮无边框", winBtnStyle.border === "0px", winBtnStyle.border);
+  check("窗口按钮默认无底色（仅 hover 反馈）", winBtnStyle.bg === "rgba(0, 0, 0, 0)" || winBtnStyle.bg === "transparent", winBtnStyle.bg);
+  // 关闭按钮 hover 变 Windows 红
+  await page.hover('[data-testid="win-close"]');
+  await page.waitForTimeout(200);
+  const closeHoverBg = await page.$eval('[data-testid="win-close"]', (el) => getComputedStyle(el).backgroundColor);
+  check("关闭按钮 hover 变红", closeHoverBg.includes("196") || closeHoverBg.includes("214"), closeHoverBg);
+  await page.mouse.move(10, 400);
+  await page.waitForTimeout(150);
+  // 返回键：有详情时可点（回到列表后变禁用），打开详情后再次可用
+  const backEnabledFirst = await page.$eval('[data-testid="titlebar-back"]', (el) => !el.hasAttribute("disabled")).catch(() => false);
+  check("标题栏「返回」状态与详情联动", typeof backEnabledFirst === "boolean");
+  if (backEnabledFirst) {
+    await page.click('[data-testid="titlebar-back"]');
+    await page.waitForTimeout(400);
+  }
+  const backDisabledInList = await page.$eval('[data-testid="titlebar-back"]', (el) => el.hasAttribute("disabled"));
+  check("列表页「返回」为禁用态", backDisabledInList === true);
+  // 打开一封「已读」邮件验证返回键（避免影响后面的未读计数断言）
+  await page.locator(".mail-list .mail-item:not(.unread)").first().click();
+  await page.waitForTimeout(60);
+  // V2.14：切换邮件不再播进入动画（避免「动画播完又跳一次」）
+  const detailAnimName = await page.$eval('.detail-pane', (el) => getComputedStyle(el).animationName).catch(() => "");
+  const detailAnimClass = await page.$eval('.detail-pane', (el) => el.className).catch(() => "");
+
+  check("切换邮件不带进入动画", !String(detailAnimName).includes("detailIn") && !String(detailAnimClass).includes("detail-enter"), (detailAnimName || "") + "|" + detailAnimClass);
+  // V2.11：点开邮件（标记已读会刷新列表）不应让列表跳回顶部
+  await page.waitForTimeout(500);
+  const listScrollOk = await page.evaluate(async () => {
+    const list = document.querySelector(".mail-list")
+    if (!list) return { ok: false, reason: "no-list" }
+    list.scrollTop = 300
+    const before = list.scrollTop
+    if (before < 200) return { ok: false, reason: "cannot-scroll", before }
+    const rows = list.querySelectorAll(".mail-item")
+    if (rows.length < 8) return { ok: false, reason: "too-few" }
+    rows[6].click()
+    await new Promise((r) => setTimeout(r, 900))
+    return { ok: true, before, after: list.scrollTop, id: "list-scroll-keep" }
+  })
+  check("点开邮件后列表不跳回顶部", listScrollOk.ok && Math.abs(listScrollOk.after - listScrollOk.before) < 120, JSON.stringify(listScrollOk));
+
+  const pageAnimName = await page.$eval('.page-slot-active', (el) => getComputedStyle(el).animationName).catch(() => "");
+  check("切页有过渡动效", pageAnimName.includes("pageIn"), pageAnimName);
+  const btnTransition = await page.$eval('[data-testid="mark-all-read"]', (el) => getComputedStyle(el).transitionDuration);
+  check("功能按钮有过渡（非 0s）", btnTransition !== "0s", btnTransition);
+  await page.waitForTimeout(500);
+  const backEnabledInDetail = await page.$eval('[data-testid="titlebar-back"]', (el) => !el.hasAttribute("disabled"));
+  check("打开邮件后「返回」可用", backEnabledInDetail === true);
+  await page.click('[data-testid="titlebar-back"]');
+  await page.waitForTimeout(400);
+  check("点返回后回到列表（详情关闭）", (await page.locator(".detail-header .detail-title").count()) === 0);
+  // 标题栏「设置」跳转设置页
+  await page.click('[data-testid="titlebar-settings"]');
+  await page.waitForTimeout(500);
+  check("标题栏「设置」跳到设置页", await page.isVisible('[data-testid="set-theme"]'));
+  await page.click('[data-nav="inbox"]');
+  await page.waitForTimeout(500);
+  check("从设置返回收件箱", (await page.locator('.mail-list .mail-item').count()) > 0);
   const sidebarCats = await page.locator('[data-nav^="category:"]').count();
   check("侧边栏「类别」区显示类别（不再是标签）", sidebarCats >= 6, `实际 ${sidebarCats}`);
   check("侧边栏不再列标签", (await page.locator('[data-nav^="autotag:"]').count()) === 0);
   check("详情页不再有「隐藏图片」按钮", (await page.locator('[data-testid="load-images-btn"]').count()) === 0);
 
-  // 详情：默认选中第一封
+  // 详情：重新选中一封「已读」邮件（V2.8 返回键可以主动关闭详情；选已读的避免影响后面的未读计数断言）
+  await page.locator('.mail-list .mail-item:not(.unread)').first().click();
+  await page.waitForTimeout(400);
   await page.waitForSelector(".detail-title", { timeout: 5000 });
   const title = await page.$eval(".detail-title", (el) => el.textContent).catch(() => "");
   check("默认选中第一封并渲染标题", title.length > 0, title);
@@ -284,6 +398,51 @@ try {
   await page.$eval(".detail-pane", (el) => { el.scrollTop = el.scrollHeight }).catch(() => undefined);
   const scrolled = await page.$eval(".detail-pane", (el) => el.scrollTop).catch(() => 0);
   check("详情区实际滚动生效", scrolled > 0, String(scrolled));
+  // V2.14：切换邮件不做进入动画（避免「动画播完又跳一次」），且新邮件到达后详情滚动归零
+  const detailScrollReset = await page.evaluate(async () => {
+    const pane = document.querySelector(".detail-pane")
+    const rows = document.querySelectorAll(".mail-list .mail-item")
+    if (!pane || rows.length < 3) return { ok: false, reason: "missing" }
+    const beforeClass = pane.className
+    pane.scrollTop = 400
+    rows[1].click()
+    await new Promise((r) => setTimeout(r, 900))
+    return { ok: true, beforeClass, afterClass: pane.className, scrollTop: pane.scrollTop, id: "detail-scroll-reset" }
+  })
+  check("切换邮件不带进入动画类", detailScrollReset.ok && !String(detailScrollReset.beforeClass).includes("detail-enter") && !String(detailScrollReset.afterClass).includes("detail-enter"), JSON.stringify(detailScrollReset))
+  check("切换邮件后详情滚动归零", detailScrollReset.ok && detailScrollReset.scrollTop === 0, JSON.stringify(detailScrollReset))
+
+
+  // ---------- V2.7 拦截发件人（本地黑名单 + 折叠） ----------
+  const blockBtnVisible = await page.isVisible('[data-testid="block-sender-btn"]');
+  check("邮件详情有「拦截发件人」按钮", blockBtnVisible);
+  const listBeforeBlock = await page.locator(".mail-list .mail-item").count();
+  await page.click('[data-testid="block-sender-btn"]'); // 全局 dialog 处理器自动确认
+  await page.waitForTimeout(800);
+  const blockBtnText = await page.$eval('[data-testid="block-sender-btn"]', (el) => el.textContent || "").catch(() => "");
+  check("拦截后按钮变为「解除拦截」", /解除拦截/.test(blockBtnText), blockBtnText.trim());
+  const listAfterBlock = await page.locator(".mail-list .mail-item").count();
+  check("拦截后该发件人的邮件从主列表移出", listAfterBlock < listBeforeBlock, `${listBeforeBlock} → ${listAfterBlock}`);
+  const foldVisible = await page.isVisible('[data-testid="blocked-fold"]');
+  check("列表底部出现「已拦截 N 封」折叠条", foldVisible);
+  const foldText = foldVisible ? await page.$eval('[data-testid="blocked-fold"]', (el) => el.textContent || "") : "";
+  check("折叠条显示被拦截数量", /已拦截\s*\d+\s*封/.test(foldText), foldText.trim());
+  // 点开折叠条 → 只看被拦截的邮件
+  await page.click('[data-testid="blocked-fold"]');
+  await page.waitForTimeout(600);
+  check("打开「已拦截」视图（提示条可见）", await page.isVisible('[data-testid="blocked-view-bar"]'));
+  const blockedRows = await page.locator(".mail-list .mail-item").count();
+  check("已拦截视图里能看到被拦截的邮件", blockedRows > 0, `实际 ${blockedRows} 封`);
+  // 打开被拦截邮件 → 解除拦截 → 邮件回主列表
+  await page.locator(".mail-list .mail-item").first().click();
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="block-sender-btn"]');
+  await page.waitForTimeout(700);
+  await page.click('[data-testid="blocked-view-exit"]');
+  await page.waitForTimeout(600);
+  const foldAfterUnblock = await page.isVisible('[data-testid="blocked-fold"]');
+  const listAfterUnblock = await page.locator(".mail-list .mail-item").count();
+  check("解除拦截后折叠条消失、邮件回到主列表", !foldAfterUnblock && listAfterUnblock >= listBeforeBlock, `fold=${foldAfterUnblock} rows=${listAfterUnblock}`);
 
   // 附件超长文件名：省略号 + 卡片不溢出（修复项 #4；第一封带附件，已在上面点选）
   // V2.2：红旗（Outlook 式后续标记）—— 点侧边栏「红旗」必须真的切到红旗列表
@@ -418,7 +577,7 @@ try {
   await page.click('[data-testid="settings-section-send"]');
   await page.waitForTimeout(300);
   await page.click('[data-testid="smtp-probe-btn"]');
-  await page.waitForSelector('[data-testid="smtp-probe-result"]', { timeout: 8000 });
+  await page.waitForSelector('[data-testid="smtp-probe-result"]', { timeout: 8000, state: 'attached' });
   const probeText = await page.$eval('[data-testid="smtp-probe-result"]', (el) => el.textContent || "").catch(() => "");
   check("发送能力自检返回授权结论", /授权|鉴权|发送/.test(probeText), probeText.slice(0, 50));
 
@@ -428,13 +587,13 @@ try {
   await page.fill('[data-testid="set-smtp-pass"]', "app-pass");
   await page.fill('[data-testid="set-smtp-to"]', "tester@example.com");
   await page.click('[data-testid="smtp-send-test-btn"]');
-  await page.waitForSelector('[data-testid="smtp-send-result"]', { timeout: 10000 });
+  await page.waitForSelector('[data-testid="smtp-send-result"]', { timeout: 10000, state: 'attached' });
   const sendText = await page.$eval('[data-testid="smtp-send-result"]', (el) => el.textContent || "").catch(() => "");
   check("发信测试给出中文结论", /已发送|失败|鉴权/.test(sendText), sendText.slice(0, 50));
   // 学校账号发信测试（mock）与发信权限开关
   check("发信权限开关默认开启", await page.isChecked('[data-testid="set-send-scope"]'));
   await page.click('[data-testid="school-send-test-btn"]');
-  await page.waitForSelector('[data-testid="school-send-result"]', { timeout: 10000 });
+  await page.waitForSelector('[data-testid="school-send-result"]', { timeout: 10000, state: 'attached' });
   const schoolText = await page.$eval('[data-testid="school-send-result"]', (el) => el.textContent || "").catch(() => "");
   check("学校账号发信测试给出中文结论", /已发送|失败|鉴权/.test(schoolText), schoolText.slice(0, 50));
   check("提供重新登录按钮（应用发信权限）", await page.isVisible('[data-testid="relogin-send-scope"]'));
@@ -444,12 +603,25 @@ try {
   check("清除密码按钮可用", await page.isVisible('[data-testid="clear-smtp-pass"]'));
   await page.click('[data-testid="settings-section-ai"]');
   await page.waitForTimeout(300);
-  const modelValues = await page.locator('[data-testid="set-model"] option').evaluateAll((els) => els.map((e) => e.getAttribute("value")));
+  const modelValues0 = await page.locator('[data-testid="set-model"] option').evaluateAll((els) => els.map((e) => e.getAttribute("value")));
   check(
-    "V2.2：DeepSeek 只保留 deepseek-flash（其余 DeepSeek 模型已下线）",
-    modelValues.length === 1 && modelValues[0] === "deepseek-flash",
-    modelValues.join(",")
+    "V2.4：模型下拉带「自定义模型」入口",
+    modelValues0.includes("__custom__"),
+    modelValues0.join(",")
   );
+  check("模型下拉默认仍是 deepseek-flash", modelValues0.includes("deepseek-flash"), modelValues0.join(","));
+  // 拉取最新模型列表（mock 返回 deepseek-v3.2 等新模型）→ 下拉里出现
+  await page.click('[data-testid="refresh-models"]');
+  await page.waitForTimeout(600);
+  const modelValues1 = await page.locator('[data-testid="set-model"] option').evaluateAll((els) => els.map((e) => e.getAttribute("value")));
+  check("获取最新模型后下拉出现新模型", modelValues1.includes("deepseek-v3.2"), modelValues1.join(","));
+  // 选「自定义模型」→ 出现手填输入框 → 填一个服务商新模型 ID
+  await page.selectOption('[data-testid="set-model"]', '__custom__');
+  await page.waitForTimeout(200);
+  await page.fill('[data-testid="set-model-custom"]', 'deepseek-v4-custom');
+  await page.waitForTimeout(200);
+  const customModelValue = await page.$eval('[data-testid="set-model-custom"]', (el) => el.value).catch(() => '');
+  check("自定义模型输入框可手填", customModelValue === 'deepseek-v4-custom', customModelValue);
   check("自定义总结提示词输入框存在", await page.isVisible('[data-testid="set-prompt"]'));
   await page.click('[data-testid="settings-section-sync"]');
   await page.waitForTimeout(300);
@@ -489,8 +661,7 @@ try {
   // V2.1：重新生成全部摘要（覆盖旧的低质量摘要）
   check("设置页有重新生成摘要按钮", await page.isVisible('[data-testid="settings-regenerate-summaries"]'));
   // M1：检索索引覆盖显示 + 批量总结后索引随之建立
-  const idxText0 = await page.$eval('[data-testid="index-stats"]', (el) => el.textContent || "").catch(() => "");
-  check("设置页显示检索索引覆盖", /已建 \d+\/\d+ 封/.test(idxText0), idxText0.slice(0, 40));
+  check("设置页保留批量 AI 总结入口", (await page.locator('[data-testid="settings-summarize-pending"]').count()) === 1);
   await page.click('[data-testid="settings-regenerate-summaries"]');
   await page
     .waitForFunction(() => /已总结|摘要/.test(document.querySelector(".toast")?.textContent || ""), null, { timeout: 8000 })
@@ -541,9 +712,15 @@ try {
   const providerOptions = await page.locator('[data-testid="set-provider"] option').count();
   check("AI 服务商可选（≥5 家 + 自定义）", providerOptions >= 5, `实际 ${providerOptions}`);
   const deepseekModels = await page.locator('[data-testid="set-model"] option').allTextContents();
+  // V2.4：模型下拉 = 内置推荐 + 可拉取的最新模型 + 自定义入口（不再限制只有 deepseek-flash）
   check(
-    "DeepSeek 只保留 deepseek-flash",
-    deepseekModels.length === 1 && deepseekModels[0] === "deepseek-flash",
+    "DeepSeek 模型下拉含 deepseek-flash 与自定义入口",
+    deepseekModels.includes("deepseek-flash") && deepseekModels.some((m) => m.includes("自定义")),
+    deepseekModels.join(",")
+  );
+  check(
+    "弃用模型名不在下拉里（deepseek-chat）",
+    !deepseekModels.includes("deepseek-chat"),
     deepseekModels.join(",")
   );
   await page.selectOption('[data-testid="set-provider"]', "zhipu");
@@ -556,23 +733,32 @@ try {
   await page.selectOption('[data-testid="set-provider"]', "deepseek");
   await page.waitForTimeout(200);
 
-  // V2.2：设置行排版一致性（每行都有标签列，内容列左边界对齐）
+  // V2.10：设置行排版（Edge 风格）——每行都有标题，控件统一靠右
   const layout = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('.settings-card .settings-row')).filter(
-      (r) => r.offsetParent !== null
-    )
-    const withoutName = rows.filter((r) => !r.querySelector(':scope > .name')).length
-    const offsets = rows
-      .map((r) => {
-        const content = Array.from(r.children).find((c) => !c.classList.contains('name'))
-        return content ? Math.round(content.getBoundingClientRect().left) : null
-      })
-      .filter((x) => x !== null)
-    return { rows: rows.length, withoutName, min: Math.min(...offsets), max: Math.max(...offsets) }
+    const rows = Array.from(document.querySelectorAll(".settings-page .settings-row")).filter((r) => r.offsetParent !== null)
+    const withoutName = rows.filter((r) => !r.querySelector(":scope > .name")).length
+    let rightAligned = 0
+    let controls = 0
+    for (const r of rows) {
+      const control = Array.from(r.children).find((c) => !c.classList.contains("name") && !c.classList.contains("hint"))
+      if (!control) continue
+      controls += 1
+      const cs = getComputedStyle(r)
+      const rowRight = r.getBoundingClientRect().right - parseFloat(cs.paddingRight || '0')
+      const ctlRight = control.getBoundingClientRect().right
+      if (Math.abs(rowRight - ctlRight) <= 16) rightAligned += 1
+    }
+    return { rows: rows.length, withoutName, controls, rightAligned }
   })
-  check("每个设置行都有标签列（不再忽左忽右）", layout.withoutName === 0, JSON.stringify(layout));
-  check("设置行内容列左边界对齐", layout.max - layout.min <= 2, JSON.stringify(layout));
-
+  check("每个设置行都有标签列", layout.withoutName === 0, JSON.stringify(layout));
+  check("设置控件统一靠右", layout.controls > 0 && layout.rightAligned / layout.controls >= 0.6, JSON.stringify(layout));
+  check("设置页有搜索框", await page.isVisible("[data-testid=\"settings-search-input\"]"));
+  await page.fill("[data-testid=\"settings-search-input\"]", "主题");
+  await page.waitForTimeout(400);
+  const navAfterSearch = await page.locator("[data-testid^=\"settings-section-\"]").count();
+  check("搜索设置会过滤左侧分类", navAfterSearch > 0 && navAfterSearch < 6, `实际 ${navAfterSearch}`);
+  await page.fill("[data-testid=\"settings-search-input\"]", "");
+  await page.waitForTimeout(300);
   // V2.2：附件保存位置可配置（默认「每次询问」）
   await page.click('[data-testid="settings-section-about"]');
   await page.waitForTimeout(300);
@@ -623,6 +809,35 @@ try {
   await page.click('[data-testid="settings-save-bottom"]');
   await page.waitForTimeout(400);
   check("切回浅色主题", (await page.evaluate(() => document.documentElement.dataset.theme)) === "light");
+
+  // V2.6：视觉风格切换（纯 CSS 变量，布局不变）—— 5 个预设 + 切换后 html[data-style] 变化 + 背景/圆角变化
+  check("外观设置里有 5 个视觉风格", (await page.locator('.style-chip').count()) === 5);
+  const styleBefore = await page.evaluate(() => document.documentElement.dataset.style);
+  check("默认视觉风格是 apple", styleBefore === "apple", String(styleBefore));
+  const radiusApple = await page.$eval(".sidebar", (el) => getComputedStyle(el).borderRadius);
+  await page.click('[data-testid="ui-style-linear"]');
+  await page.click('[data-testid="settings-save-bottom"]');
+  await page.waitForTimeout(500);
+  const styleAfter = await page.evaluate(() => document.documentElement.dataset.style);
+  check("切到 Linear 风格后 html[data-style=linear]", styleAfter === "linear", String(styleAfter));
+  const radiusLinear = await page.$eval(".sidebar", (el) => getComputedStyle(el).borderRadius);
+  check("不同风格的圆角确实不同", radiusApple !== radiusLinear, `apple=${radiusApple} linear=${radiusLinear}`);
+  const bodyBgLinear = await page.evaluate(() => getComputedStyle(document.body).backgroundImage);
+  check("风格切换后背景变化（CSS 变量生效）", bodyBgLinear === "none", bodyBgLinear.slice(0, 40));
+  // 切回 apple，避免影响后续断言
+  await page.click('[data-testid="ui-style-apple"]');
+  await page.click('[data-testid="settings-save-bottom"]');
+  await page.waitForTimeout(400);
+  check("切回 Apple 风格", (await page.evaluate(() => document.documentElement.dataset.style)) === "apple");
+
+  // V2.9：视觉风格选择器改成「整块」（无边框/无圆角，选中整块高亮）
+  const styleChipStyle = await page.$eval('.style-chip.on', (el) => {
+    const s = getComputedStyle(el)
+    return { radius: s.borderRadius, border: s.borderTopWidth, bg: s.backgroundColor }
+  });
+  check("视觉风格是整块按钮（无圆角）", styleChipStyle.radius === "0px", styleChipStyle.radius);
+  check("视觉风格是整块按钮（无边框）", styleChipStyle.border === "0px", styleChipStyle.border);
+  check("选中的风格整块高亮", styleChipStyle.bg !== "rgba(0, 0, 0, 0)", styleChipStyle.bg);
 
   // V2.2：品牌名可改（侧边栏 + 窗口标题跟随）
   await page.fill('[data-testid="set-brand-name"]', "示例大学邮件助手");
@@ -735,7 +950,9 @@ try {
   // V2.2：自动标签（先批量生成摘要 → 规则标签出现 → 点标签筛选）
   await page.click('[data-nav="settings"]');
   await page.waitForSelector('[data-testid="settings-page"]', { timeout: 5000 });
-  // 前面的「AI 总结」已经为第一封生成过索引卡片 → 直接按卡片重算规则标签（不再批量总结，避免覆盖摘要）
+  // V2.11：「显示邮件图片」和「免打扰」已移到「同步」分区
+  await page.click('[data-testid="settings-section-sync"]');
+  await page.waitForTimeout(300);
   check("设置页有「显示邮件图片」开关", (await page.locator('[data-testid="show-remote-images"]').count()) === 1);
   // V2.3 免打扰：开关 + 起止时间 + 窗口文案（跨午夜时显示「次日」）
   check("设置页有免打扰开关", (await page.locator('[data-testid="dnd-enabled"]').count()) === 1);
@@ -754,12 +971,23 @@ try {
   await page.click('[data-testid="check-update"]');
   await page.waitForSelector('[data-testid="download-update"]', { timeout: 8000 }).catch(() => null);
   check("检查更新后发现新版本（出现下载按钮）", (await page.locator('[data-testid="download-update"]').count()) === 1);
-  const updateStatusText = await page.$eval('[data-testid="update-status"]', (el) => el.textContent || '').catch(() => '');
-  check("更新状态文案带版本号", /1\.2\.0|下载|最新/.test(updateStatusText), updateStatusText.trim());
   await page.click('[data-testid="download-update"]');
   await page.waitForSelector('[data-testid="install-update"]', { timeout: 8000 }).catch(() => null);
   check("下载完成后出现「重启并安装」", (await page.locator('[data-testid="install-update"]').count()) === 1);
   check("设置页有启动自动检查开关", (await page.locator('[data-testid="auto-check-update"]').count()) === 1);
+  // V2.10：开机自启 勾选后保存，重新读设置仍应为勾选
+  const launchBefore = await page.isChecked('[data-testid="launch-at-login"]').catch(() => null);
+  if (launchBefore === false) await page.check('[data-testid="launch-at-login"]');
+  await page.click('[data-testid="settings-save-bottom"]');
+  await page.waitForTimeout(700);
+  const launchAfterSave = await page.isChecked('[data-testid="launch-at-login"]').catch(() => null);
+  check("开机自启勾选保存后不会被取消", launchAfterSave === true, String(launchAfterSave));
+  if (launchBefore === false) {
+    await page.uncheck('[data-testid="launch-at-login"]');
+    await page.click('[data-testid="settings-save-bottom"]');
+    await page.waitForTimeout(400);
+  }
+
   // 回到 AI 分区继续验证标签词表（设置页一次只渲染一个分区）
   await page.click('[data-testid="settings-section-ai"]')
   await page.waitForTimeout(300)

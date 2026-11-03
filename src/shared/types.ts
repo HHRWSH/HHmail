@@ -1,3 +1,4 @@
+import type { UiStyle } from './uiStyles'
 /**
  * 主进程 / 渲染进程共享的 DTO 类型。
  * 只放"跨进程传输"的数据形状；领域内部类型放在各自模块（mail/types.ts 等）。
@@ -259,6 +260,8 @@ export interface MailListItem {
   category?: MailCategory | null
   /** 待触发的稍后提醒时间（ms 时间戳；null = 无，V2 M6） */
   snoozeUntil: number | null
+  /** V2.7：是否命中本地拦截规则（被折叠、不计未读/角标/通知） */
+  blocked: boolean
 }
 
 export interface AttachmentMeta {
@@ -359,6 +362,10 @@ export interface AppSettings {
   showRemoteImages: boolean
   /** 启动后自动检查更新（只检查，不自动下载安装） */
   autoCheckUpdate: boolean
+  /** 视觉风格预设（V2.6：apple / linear / notion / paper / glass） */
+  uiStyle: UiStyle
+  /** 开机自动启动（隐藏启动，驻留托盘） */
+  launchAtLogin: boolean
   /** 免打扰：开启后窗口内不弹系统通知（照常同步/计未读/推应用内事件） */
   dndEnabled: boolean
   /** 免打扰起止（HH:mm，支持跨午夜） */
@@ -435,6 +442,8 @@ export interface SetSettingsArgs {
   listPageSize?: number
   showRemoteImages?: boolean
   autoCheckUpdate?: boolean
+  uiStyle?: UiStyle
+  launchAtLogin?: boolean
   dndEnabled?: boolean
   dndStart?: string
   dndEnd?: string

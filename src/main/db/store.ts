@@ -20,7 +20,8 @@ import type {
 } from '../../shared/types'
 
 import type { WeightedTerm } from '../../shared/retrievalQuery'
-import type { TaskCandidate, TaskItem } from '../../shared/tasks'
+import type { TaskChecklistItem, TaskItem, TaskLinkKind } from '../../shared/tasks'
+import type { BlockKind, BlockSender } from '../../shared/blocklist'
 
 export type { ChatMessage, ChatSession, CollectionMail, CollectionSummary, WeeklyBrief }
 import type { ParsedMessage } from '../mail/types'
@@ -49,6 +50,8 @@ export interface QueryParams {
   filter?: ViewFilter
   /** 视图排序（V2 M5；缺省 date desc） */
   sort?: ViewSort
+  /** V2.7：只看被拦截的邮件（默认查询会自动排除 blocked） */
+  blockedOnly?: boolean
 }
 
 export interface SearchHit {
@@ -126,8 +129,6 @@ export interface MessageStore {
   setSyncState(state: SyncStateRecord): Promise<void>
   /** 该文件夹本地已入库的最大 UID（0 = 无）；用于「修复同步」把游标回退到本地实际进度 */
   getMaxUid(folder?: string): Promise<number>
-  /** UID → 本地 message id（同步后重建待办等增量处理用；不存在的 UID 会被忽略） */
-  idsByUids(uids: number[], folder?: string): Promise<number[]>
   /** 该文件夹本地已入库的全部 UID（与服务端 UID SEARCH ALL 对账用） */
   listUids(folder?: string): Promise<number[]>
   /** 待 AI 总结的邮件（新→旧）：默认只返回「还没有摘要」的；force=true 时返回全部（重新生成） */
@@ -245,6 +246,8 @@ export interface MessageStore {
   markSnoozeNotified(snoozeId: number): Promise<void>
   /** 批量标记已读/未读（只改本地；V2 M7） */
   bulkMarkRead(ids: number[], read: boolean): Promise<void>
+  /** 把某文件夹的全部未读标记为已读（只改本地；V2.4 一键已读），返回改动条数 */
+  markAllRead(folder?: string): Promise<number>
   /** 批量加标签（并入现有标签，非覆盖；V2 M7） */
   bulkAddLabels(ids: number[], labelIds: number[]): Promise<void>
   /** 草稿列表（V2 M9，updated_at 倒序） */
@@ -259,26 +262,40 @@ export interface MessageStore {
   listSentItems(limit: number): Promise<SentItem[]>
   /** 删除一条已发送记录 */
   deleteSentItem(id: number): Promise<void>
+  // ---- 拦截发件人（V2.7：本地黑名单 + 折叠） ----
+  /** 全部拦截规则（按创建时间倒序） */
+  listBlockSenders(): Promise<BlockSender[]>
+  /** 新增规则（值需已归一化；重复则幂等），并对现有邮件重算 blocked */
+  addBlockSender(input: { kind: BlockKind; value: string }): Promise<BlockSender[]>
+  /** 删除规则（按 id），并重算 blocked */
+  removeBlockSender(id: number): Promise<BlockSender[]>
+  /** 删除命中该发件人的所有规则（邮件详情「解除拦截」用），并重算 blocked */
+  removeBlockRulesForAddress(address: string): Promise<BlockSender[]>
+  /** 按当前规则全量重算 messages.blocked，返回发生变化的邮件数 */
+  applyBlockRules(): Promise<number>
   /** 记录本地退订结果（done/failed + 说明；V2.3，只记本地不改服务端） */
   setUnsubscribeState(messageId: number, status: 'done' | 'failed', detail?: string | null): Promise<void>
-  // ---- 待办（V2.3） ----
-  /** 全部待办（关联邮件主题/发件人；按截止升序、无截止靠后） */
+  // ---- 待办（V2.4 备忘录式：全手动，含引用） ----
+  /** 全部待办（含清单与引用；按完成状态/截止排序） */
   listTasks(): Promise<TaskItem[]>
-  /** 指定邮件的待办（重建时用来保留已完成状态） */
-  tasksForMessages(ids: number[]): Promise<TaskItem[]>
-  /**
-   * 用新候选任务**替换**这些邮件的自动任务（card/summary），手动任务（manual）原样保留。
-   * 已存在的同 key 任务保留其 done 状态（用户勾选过的不该被重建覆盖）。
-   */
-  replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void>
-  /** 手动新增任务（messageId 可空） */
-  createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem>
-  /** 更新任务（标题/截止/完成） */
-  updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem>
-  /** 删除任务（手动删除的任务若来自 card/summary，重建时会再次出现 —— 调用方负责提示） */
+  /** 单张待办卡（含清单与引用） */
+  getTask(id: number): Promise<TaskItem | null>
+  /** 新建待办（标题可空 → 用「未命名待办」；可同时挂一封邮件引用） */
+  createTask(input: { title?: string; body?: string; dueTs?: number | null; mailId?: number | null }): Promise<TaskItem>
+  /** 更新待办（标题/正文/截止/完成/清单整表替换） */
+  updateTask(
+    id: number,
+    patch: { title?: string; body?: string; dueTs?: number | null; done?: boolean; checklist?: TaskChecklistItem[] }
+  ): Promise<TaskItem>
+  /** 删除待办（连带引用关系） */
   deleteTask(id: number): Promise<void>
-  /** 批量取索引卡片（重建待办用：只有卡片/DUE，不读正文） */
-  getIndexDocsFor(ids: number[]): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>>
+  /** 加一条引用（kind=mail 时 refId=messages.id；kind=datetime 时 refId=毫秒时间戳）；返回最新待办 */
+  addTaskLink(
+    taskId: number,
+    link: { kind: TaskLinkKind; refId: string; label?: string | null; sub?: string | null }
+  ): Promise<TaskItem>
+  /** 删除一条引用 */
+  removeTaskLink(taskId: number, linkId: number): Promise<TaskItem>
   close(): void
 }
 

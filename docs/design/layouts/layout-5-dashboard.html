@@ -1,0 +1,74 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>L5 仪表盘</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f4f6f9;color:#141820;font-size:13px;overflow:hidden}
+.side{position:fixed;left:0;top:0;bottom:0;width:210px;background:#fff;border-right:1px solid #e7e9ee;padding:16px 12px}
+.brand{display:flex;gap:8px;align-items:center;margin-bottom:18px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#5b8def,#22c1a4);display:grid;place-items:center;color:#fff;font-weight:800}
+.brand b{font-size:13.5px}
+.ni{display:flex;gap:9px;align-items:center;padding:8px 10px;border-radius:9px;font-size:12.5px;color:#4a505c}
+.ni.on{background:#eef2ff;color:#3b5bdb;font-weight:600}
+.main{margin-left:210px;height:100vh;overflow:auto;padding:18px 20px 24px}
+.hd{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.hd h1{font-size:19px;font-weight:750}
+.hd .sub{font-size:12px;color:#8a90a0}
+.hd .sr{margin-left:auto;background:#fff;border:1px solid #e7e9ee;border-radius:10px;padding:8px 13px;color:#8a90a0;font-size:12px;min-width:240px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat{background:#fff;border:1px solid #e7e9ee;border-radius:14px;padding:14px 16px}
+.stat .k{font-size:11px;color:#8a90a0;letter-spacing:.3px}
+.stat .v{font-size:24px;font-weight:800;margin-top:6px;letter-spacing:-.5px}
+.stat .d{font-size:11px;color:#8a90a0;margin-top:4px}
+.stat.warn .v{color:#b45309}
+.stat.blue .v{color:#3b5bdb}
+.split{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;align-items:start}
+.panel{background:#fff;border:1px solid #e7e9ee;border-radius:14px;overflow:hidden}
+.ph{display:flex;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid #f0f1f4;font-size:13px;font-weight:700}
+.ph .c{margin-left:auto;font-size:11px;color:#8a90a0;font-weight:500}
+.mlist{padding:6px 8px}
+.mrow{display:flex;gap:10px;padding:10px;border-radius:10px}
+.mrow.on{background:#eef4ff}
+.mrow .av{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11.5px;flex:none}
+.mrow .mn{min-width:0;flex:1}
+.mrow .t1{display:flex;gap:8px;align-items:baseline}
+.mrow .fr{font-size:12px;font-weight:700}
+.mrow .tm{margin-left:auto;font-size:10.5px;color:#9aa1b0}
+.mrow .sj{font-size:12.5px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .sn{font-size:11.5px;color:#8a90a0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.detail{padding:16px 18px}
+.detail h2{font-size:19px;font-weight:750;letter-spacing:-.2px;margin-bottom:10px}
+.detail .who{display:flex;gap:9px;align-items:center;font-size:12px;color:#8a90a0}
+.detail .who .av{width:28px;height:28px;border-radius:9px;background:#3b82f6;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px}
+.detail .body{margin-top:14px;font-size:13px;line-height:1.8;color:#3d434f}
+.detail .att{display:flex;gap:8px;margin-top:12px}
+.detail .att span{font-size:11px;background:#f4f6f9;border-radius:8px;padding:6px 10px;color:#4a505c}
+.todo{margin-top:16px;border-top:1px solid #f0f1f4;padding-top:14px}
+.todo .th{font-size:12px;font-weight:700;margin-bottom:8px}
+.todo .ti{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;color:#3d434f}
+.todo .bx{width:15px;height:15px;border-radius:4px;border:1.5px solid #cfd4dc;display:grid;place-items:center;font-size:10px;color:#fff}
+.todo .bx.on{background:#2f9e6e;border-color:#2f9e6e}
+</style></head><body>
+<aside class="side"><div class="brand"><div class="logo">H</div><b>HHmail</b></div><div class="ni on"><span>📥</span>收件箱</div><div class="ni "><span>✨</span>AI 助手</div><div class="ni "><span>✏️</span>草稿箱</div><div class="ni "><span>📚</span>知识库</div><div class="ni "><span>🗓</span>日历</div><div class="ni "><span>☑️</span>待办</div><div class="ni "><span>↗</span>已发送</div></aside>
+<div class="main">
+  <div class="hd"><h1>收件箱总览</h1><span class="sub">2026 年 11 月 3 日 · 周一</span><div class="sr">🔍 搜索邮件…</div></div>
+  <div class="stats">
+    <div class="stat blue"><div class="k">未读邮件</div><div class="v">12</div><div class="d">比昨天多 3 封</div></div>
+    <div class="stat warn"><div class="k">今天到期</div><div class="v">2</div><div class="d">选课确认 · 论文初稿</div></div>
+    <div class="stat"><div class="k">待处理邮件</div><div class="v">7</div><div class="d">需要回复 / 加待办</div></div>
+    <div class="stat"><div class="k">待办</div><div class="v">4</div><div class="d">1 件已逾期</div></div>
+  </div>
+  <div class="split">
+    <div class="panel"><div class="ph">最近邮件<span class="c">12 封未读</span></div><div class="mlist">
+      <div class="mrow on"><div class="av" style="background:#3b82f6">林</div><div class="mn"><div class="t1"><span class="fr">Prof. 林教授</span><span class="tm">10:53</span></div><div class="sj"><b>●</b> 关于毕业论文进度的沟通</div><div class="sn">附件里是我整理的时间表，下周三前把初稿发我看看。</div></div></div><div class="mrow "><div class="av" style="background:#0ea5e9">教</div><div class="mn"><div class="t1"><span class="fr">教务处</span><span class="tm">09:20</span></div><div class="sj"><b>●</b> 【重要】关于选课与学费缴费的通知</div><div class="sn">本学期第二阶段选课将于 11 月 7 日 18:00 截止，请及时确认。</div></div></div><div class="mrow "><div class="av" style="background:#8b5cf6">图</div><div class="mn"><div class="t1"><span class="fr">图书馆</span><span class="tm">昨天</span></div><div class="sj"><b>●</b> CSE 系周会纪要 & 下周活动安排</div><div class="sn">本周五 15:30 在 SHB 123 举行系周会，会后有茶歇。</div></div></div><div class="mrow "><div class="av" style="background:#ef4444">IT</div><div class="mn"><div class="t1"><span class="fr">IT 服务台</span><span class="tm">昨天</span></div><div class="sj">您借阅的资源即将到期，请及时归还</div><div class="sn">您借阅的《Computer Networks》将于 11 月 6 日到期。</div></div></div><div class="mrow "><div class="av" style="background:#f59e0b">王</div><div class="mn"><div class="t1"><span class="fr">王同学</span><span class="tm">周一</span></div><div class="sj">组队需要：CSCI 540 期末 project</div><div class="sn">看到你也在选这门课，方便的话我们组个队？</div></div></div>
+    </div></div>
+    <div class="panel"><div class="ph">邮件详情 + 待办</div><div class="detail">
+      <h2>关于毕业论文进度的沟通</h2>
+      <div class="who"><div class="av">林</div>Prof. 林教授 · lin@link.cuhk.edu.hk · 今天 10:53</div>
+      <div class="body">老师好，附件里是我整理的时间表，下周三前把初稿发我看看。<br><br>另外第 2 章的结构可以再压缩一些，重点放在实验部分。</div>
+      <div class="att"><span>📎 论文时间表.xlsx</span><span>📎 初稿模板.docx</span></div>
+      <div class="todo"><div class="th">☑ 这封邮件里的待办</div>
+        <div class="ti"><span class="bx on">✓</span>整理时间表</div>
+        <div class="ti"><span class="bx"></span>压缩第 2 章结构</div>
+        <div class="ti"><span class="bx"></span>周三前发初稿给老师</div>
+      </div>
+    </div></div>
+  </div>
+</div></body></html>

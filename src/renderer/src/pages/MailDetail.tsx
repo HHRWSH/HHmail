@@ -17,7 +17,9 @@ import { renderMarkdown } from '@shared/markdown'
 import { mergeTags, parseVocabulary } from '@shared/tags'
 import { avatarColor, avatarInitial } from '@shared/avatar'
 import { useSettings } from '../settings-context'
+import { Icon } from '../components/Icon'
 import { parseUnsubscribe, unsubscribeButtonLabel, unsubscribeConfirmText } from '@shared/unsubscribe'
+import { formatTaskDue, parseActionItems } from '@shared/tasks'
 import { SummaryView } from '../components/SummaryView'
 import { buildQuotedBody, buildReplySubject, ComposeModal, type ComposeInitial } from '../components/ComposeModal'
 
@@ -101,6 +103,52 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
       }),
     [mail?.listUnsubscribe, mail?.listUnsubscribePost]
   )
+  // V2.4：把这封邮件加进待办（用户主动点击；标题取邮件主题，引用挂上这封邮件）
+  const [addingTask, setAddingTask] = useState(false)
+  const addToTasks = useCallback(async () => {
+    if (!mail || addingTask) return
+    setAddingTask(true)
+    try {
+      await api.createTask({ title: mail.subject || '(无主题)', body: mail.snippet || '', mailId: mail.id })
+      onToast('已加入待办（☑ 待办页可继续编辑）')
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setAddingTask(false)
+    }
+  }, [mail, addingTask, onToast])
+  // V2.7 拦截发件人（本地黑名单 + 折叠；不改服务器）
+  const [blockBusy, setBlockBusy] = useState(false)
+  const toggleBlockSender = useCallback(async () => {
+    if (!mail || blockBusy) return
+    setBlockBusy(true)
+    try {
+      if (mail.blocked) {
+        if (!window.confirm(`解除对 ${mail.fromAddr} 的拦截？（该发件人的邮件会重新出现在收件箱）`)) return
+        await api.unblockAddress(mail.fromAddr)
+        // 乐观更新：按钮/提示立刻反映最新状态（随后 load 再以库里数据为准）
+        setMail((prev) => (prev && prev.id === mail.id ? { ...prev, blocked: false } : prev))
+        onToast(`已解除拦截：${mail.fromAddr}`)
+      } else {
+        if (
+          !window.confirm(
+            `拦截 ${mail.fromAddr}？\n该发件人的邮件会折叠到「已拦截」，不计未读、不弹通知；随时可在设置里解除。`
+          )
+        ) {
+          return
+        }
+        await api.blockSender({ address: mail.fromAddr })
+        setMail((prev) => (prev && prev.id === mail.id ? { ...prev, blocked: true } : prev))
+        onToast(`已拦截 ${mail.fromAddr}，其邮件已折叠`)
+      }
+      await load(mail.id)
+      onMailChanged?.()
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setBlockBusy(false)
+    }
+  }, [mail, blockBusy, onToast, load, onMailChanged])
   const doUnsubscribe = useCallback(async () => {
     if (!mail || unsubBusy) return
     if (unsubInfo.kind === 'none') return
@@ -408,6 +456,44 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
     [mail?.bodyHtml]
   )
 
+  // V2.4：摘要里的「截止与行动项」→ 一键转为待办（用户点击才算，不会自动生成）
+  // 注意：必须在提前 return 之前调用（React hooks 顺序规则）
+  const summaryTextForActions = summary ?? mail?.savedSummary ?? null
+  const summaryActionItems = useMemo(
+    () => (summaryTextForActions ? parseActionItems(summaryTextForActions, new Date().getFullYear()).slice(0, 6) : []),
+    [summaryTextForActions]
+  )
+  const addActionToTasks = useCallback(
+    async (item: { title: string; dueTs: number | null }) => {
+      if (!mail || addingTask) return
+      setAddingTask(true)
+      try {
+        await api.createTask({
+          title: item.title,
+          body: `来自邮件《${mail.subject}》的摘要行动项`,
+          dueTs: item.dueTs,
+          mailId: mail.id
+        })
+        onToast('已加入待办')
+      } catch (e) {
+        onToast(errorMessage(e))
+      } finally {
+        setAddingTask(false)
+      }
+    },
+    [mail, addingTask, onToast]
+  )
+
+  // V2.14：切换邮件时不再做进入动画（异步加载会让「动画先播完、内容后到」看起来像二次跳转），
+  // 改为「新邮件内容真正到达后，把详情滚动位置归零」——一次干净切换，不会有两段动作。
+  const detailPaneRef = useRef<HTMLDivElement | null>(null)
+  const shownMailId = mail?.id ?? null
+  useEffect(() => {
+    if (shownMailId === null) return
+    const el = detailPaneRef.current
+    if (el) el.scrollTop = 0
+  }, [shownMailId])
+
   if (!mailId || !mail) {
     return (
       <div className="detail-empty" data-testid="detail-empty">
@@ -422,10 +508,11 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
   const showHtml = !!mail.bodyHtml
   const savedSummaryVisible = !summary && !!mail.savedSummary
   const shownSummary = summary ?? mail.savedSummary
+
   const shownModel = summaryModel ?? mail.savedSummaryModel
 
   return (
-    <div className="detail-pane" data-testid="mail-detail" tabIndex={-1}>
+    <div ref={detailPaneRef} className="detail-pane" data-testid="mail-detail" tabIndex={-1}>
       <div className="detail-header">
         <div className="detail-title">{mail.subject}</div>
         <div className="detail-from">
@@ -452,7 +539,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             ))}
             {/* V2.2：类别只体现为颜色（用户要求：不要在这里显示类别名 chip） */}
             <button className="link-btn" onClick={() => setTagExampleOpen((v) => !v)} data-testid="tag-example-btn">
-              🏷 设为 AI 标签示例
+              <><Icon name="tag" /> 设为 AI 标签示例</>
             </button>
           </div>
         )}
@@ -494,7 +581,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             title={mail.starred ? '取消星标' : '加星标'}
             data-testid="star-btn"
           >
-            {mail.starred ? '★ 已星标' : '☆ 星标'}
+            <><Icon name="star" /> {mail.starred ? '已星标' : '星标'}</>
           </button>
           {/* V2.2：彩色类别（Gmail 风格）—— 标记后列表行用该颜色淡色背景常亮 */}
           <button
@@ -504,7 +591,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             data-testid="category-btn"
             style={mail.category ? { borderColor: mail.category.color, color: mail.category.color } : undefined}
           >
-            {mail.category ? `🎨 ${mail.category.name}` : '🎨 类别'}
+            <><Icon name="palette" /> {mail.category ? mail.category.name : '类别'}</>
           </button>
           {/* V2.2：红旗（后续标记）—— 与星标独立，列表里会用红色小旗标出 */}
           <button
@@ -513,7 +600,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             title={mail.flagged ? '取消红旗' : '标红旗（后续跟进）'}
             data-testid="flag-btn"
           >
-            {mail.flagged ? '🚩 已标红旗' : '⚐ 红旗'}
+            <><Icon name="flag" /> {mail.flagged ? '已标红旗' : '红旗'}</>
           </button>
           <button
             className="chip-btn"
@@ -521,7 +608,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             title="管理标签"
             data-testid="labels-btn"
           >
-            🏷 标签{mail.labels.length > 0 ? `（${mail.labels.length}）` : ''}
+            <><Icon name="tag" /> 标签{mail.labels.length > 0 ? `（${mail.labels.length}）` : ''}</>
           </button>
           <button
             className={`chip-btn ${mail.snoozeUntil !== null ? 'snooze-on' : ''}`}
@@ -529,7 +616,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             title="稍后提醒"
             data-testid="snooze-btn"
           >
-            ⏰ {mail.snoozeUntil !== null ? '已设提醒' : '稍后提醒'}
+            <><Icon name="clock" /> {mail.snoozeUntil !== null ? '已设提醒' : '稍后提醒'}</>
           </button>
           <button
             className="chip-btn accent"
@@ -537,7 +624,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             disabled={summarizing}
             data-testid="ai-summarize-btn"
           >
-            ✨ {summarizing ? 'AI 总结中…' : mail.savedSummary ? '重新总结' : 'AI 总结'}
+            <><Icon name="sparkles" /> {summarizing ? 'AI 总结中…' : mail.savedSummary ? '重新总结' : 'AI 总结'}</>
           </button>
           <button
             className="chip-btn"
@@ -552,7 +639,7 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             }
             data-testid="reply-btn"
           >
-            ↩ 回复
+            <><Icon name="reply" /> 回复</>
           </button>
           <button
             className="chip-btn"
@@ -566,7 +653,17 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
             }
             data-testid="forward-btn"
           >
-            ↪ 转发
+            <><Icon name="sent" /> 转发</>
+          </button>
+          {/* V2.4 加入待办：以这封邮件为引用手动创建一张待办卡（用户主动点击） */}
+          <button
+            className="btn ghost"
+            onClick={() => void addToTasks()}
+            disabled={addingTask}
+            title="以这封邮件为引用，新建一张待办"
+            data-testid="add-to-tasks"
+          >
+            <><Icon name="task-add" /> {addingTask ? '添加中…' : '加入待办'}</>
           </button>
           {/* V2.3 一键退订：仅当邮件头带 List-Unsubscribe 时出现；必须二次确认 */}
           {unsubInfo.kind !== 'none' && (
@@ -583,9 +680,19 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
                   : '退订失败'
                 : unsubBusy
                   ? '退订中…'
-                  : `🚫 ${unsubscribeButtonLabel(unsubInfo) ?? '退订'}`}
+                  : <><Icon name="bell-off" /> {unsubscribeButtonLabel(unsubInfo) ?? '退订'}</>}
             </button>
           )}
+          {/* V2.7 拦截发件人：本地黑名单，命中后该发件人的邮件折叠到「已拦截」（不改服务器） */}
+          <button
+            className="btn ghost"
+            onClick={() => void toggleBlockSender()}
+            disabled={blockBusy}
+            title={mail.blocked ? '解除拦截：把该发件人的邮件移回收件箱' : '拦截该发件人：其邮件将折叠到「已拦截」'}
+            data-testid="block-sender-btn"
+          >
+            <><Icon name={mail.blocked ? 'undo' : 'block'} /> {mail.blocked ? '解除拦截' : '拦截发件人'}</>
+          </button>
         </div>
         {labelsOpen && (
           <div className="label-panel" data-testid="label-panel">
@@ -738,11 +845,30 @@ export const MailDetailPane = memo(function MailDetailPane({ mailId, onToast, on
               </div>
             )}
           </div>
+          {summaryActionItems.length > 0 && (
+            <div className="summary-actions" data-testid="summary-action-items">
+              <div className="summary-actions-label">摘要里的行动项（点一下加入待办）</div>
+              {summaryActionItems.map((item, i) => (
+                <div className="summary-action-row" key={`${item.title}-${i}`}>
+                  <span className="t">{item.title}</span>
+                  {item.dueTs ? <span className="d">{formatTaskDue(item.dueTs, Date.now())}</span> : null}
+                  <button
+                    className="btn ghost sm"
+                    onClick={() => void addActionToTasks(item)}
+                    disabled={addingTask}
+                    data-testid="summary-to-task"
+                  >
+                    → 待办
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       <div className="detail-body" data-testid="detail-body" onClick={onBodyClick}>
-        {loading ? '加载中…' : showHtml ? <div dangerouslySetInnerHTML={{ __html: bodyHtml ?? '' }} /> : <pre className="plain">{mail.bodyText || '（无正文）'}</pre>}
+        {showHtml ? <div dangerouslySetInnerHTML={{ __html: bodyHtml ?? '' }} /> : <pre className="plain">{mail.bodyText || '（无正文）'}</pre>}
       </div>
 
       {mail.attachments.length > 0 && (

@@ -3,17 +3,17 @@
  * contextIsolation: true、nodeIntegration: false、sandbox: true、无 webviewTag。
  * 关闭窗口 → 最小化到托盘后台运行；托盘右键可「显示主窗口 / 退出应用」。
  */
-import { app, BrowserWindow, dialog, nativeImage, Notification, powerMonitor, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, nativeTheme, Notification, powerMonitor, safeStorage } from 'electron'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { bootstrap, normalizeDbFileName, type AppContext } from './bootstrap'
 import { FileLogger } from './logger'
 import { registerIpcHandlers, summarizePendingBatch } from './ipc'
-import { rebuildTasksForMessages } from './tasks/rebuild'
 import { createUnreadBadgeController } from './unreadBadge'
 import { createUpdateController } from './update'
 import { createRuntimeUpdater } from './updateRuntime'
 import { badgeIconDataUrl } from './badgeIcon'
+import { applyLoginItem, isHiddenStart } from './loginItem'
 import { repairNoisyBodies } from './db/repair'
 import { createTray, type TrayController } from './tray'
 import { handleNewMails } from './ipc'
@@ -49,7 +49,44 @@ const PREVIOUS_APPDATA_DIR = 'mail-ai-assistant'
 const LEGACY_APPDATA_DIR = 'cuhk-mail-ai'
 
 const USERDATA_ENV = envAny('HHMAIL_USERDATA', 'MAILAI_USERDATA', 'LEGACY_MAIL_USERDATA')
-const userDataOverride = USERDATA_ENV ?? app.getPath('userData')
+/**
+ * 选择/迁移 userData 目录。
+ * 必须在 requestSingleInstanceLock() 之前执行：单实例锁文件建在 userData 里，
+ * 如果目录不可写（受限环境/便携模式），锁会失败 -> 应用直接退出且没有任何日志。
+ */
+function applyUserDataPaths(): void {
+  if (USERDATA_ENV) {
+    app.setPath('userData', USERDATA_ENV)
+    return
+  }
+  try {
+    if (app.getPath('userData').endsWith('Electron')) {
+      // 裸 electron（开发/诊断）默认落到 Roaming\Electron：使用工程内可写目录，避免锁文件失败
+      const devDir = path.join(process.cwd(), '.dev-userdata')
+      fs.mkdirSync(devDir, { recursive: true })
+      app.setPath('userData', devDir)
+      return
+    }
+  } catch {
+    /* ignore */
+  }
+  let usingPrevious = false
+  try {
+    const appData = app.getPath('appData')
+    const previous = path.join(appData, PREVIOUS_APPDATA_DIR)
+    if (fs.existsSync(path.join(previous, 'mail-ai.db')) || fs.existsSync(path.join(previous, 'logs'))) {
+      app.setPath('userData', previous)
+      usingPrevious = true
+    }
+  } catch {
+    /* 判断失败就用默认目录，不影响启动 */
+  }
+  if (!usingPrevious) migrateLegacyUserData()
+  normalizeDbFileName(app.getPath('userData'))
+}
+
+applyUserDataPaths()
+const userDataOverride = app.getPath('userData')
 export const GPU_SAFE_MODE_MARKER = path.join(userDataOverride, 'gpu-safe-mode')
 const FORCE_SOFTWARE_GPU = envAny('HHMAIL_DISABLE_GPU', 'MAILAI_DISABLE_GPU', 'LEGACY_MAIL_DISABLE_GPU') === '1'
 let gpuSafeMode =
@@ -75,8 +112,6 @@ let ctx: AppContext | null = null
 let tray: TrayController | null = null
 let snoozeTimer: SnoozeSchedulerHandle | null = null
 let autoSync: AutoSyncScheduler | null = null
-/** V2.3：待办全量重建只在本次进程里做一次（之后靠同步/摘要后的增量） */
-let tasksStartupRebuilt = false
 /** 每次自动同步成功后最多补几封摘要（控制成本） */
 const AUTO_SUMMARY_CATCHUP_LIMIT = 3
 let isQuitting = false
@@ -128,6 +163,9 @@ export function migrateLegacyUserData(): boolean {
   }
 }
 
+// 开机自启时带 --hidden：启动后只驻留托盘，不弹窗口
+const START_HIDDEN = isHiddenStart(process.argv)
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -136,6 +174,14 @@ function createWindow(): void {
     minHeight: 640,
     autoHideMenuBar: true,
     title: DEFAULT_BRAND_NAME,
+    // 窗口底色（V2.14）：避免切换邮件/重绘间隙露出窗口默认白色，造成「闪一下」
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#12141a' : '#f5f5f7',
+    // V2.8：无边框窗口 + 自绘标题栏（渲染层 TitleBar 里集成 返回/搜索/同步/全部已读/设置 + 最小化/最大化/关闭）
+    frame: process.platform === 'win32' ? false : true,
+    // 开发态窗口图标（打包后任务栏用 exe 图标，无需再传）
+    icon: app.isPackaged ? undefined : path.join(__dirname, '../../resources/icon.ico'),
+    // 开机自启（--hidden）时先不显示，等 ready-to-show 再决定是否 show
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -178,6 +224,10 @@ function createWindow(): void {
     void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
+  mainWindow.once('ready-to-show', () => {
+    if (!START_HIDDEN) mainWindow?.show()
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -198,30 +248,8 @@ async function applyBrandTitle(context: AppContext): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // 诊断用：允许指定 userData（默认按 app 名；裸 electron 运行时会落到 Roaming\Electron）
-  if (USERDATA_ENV) {
-    app.setPath('userData', USERDATA_ENV)
-  } else {
-    // 项目改名 HHmail 后，Electron 默认数据目录会变成 %APPDATA%\hhmail；
-    // **只要老目录（%APPDATA%\mail-ai-assistant）存在就继续用它** —— 那里有用户的邮件库、摘要索引与登录态，
-    // 换成新目录会让用户「像丢了数据一样」（还要重新同步、重新花 AI 额度）。
-    // 只有全新安装（没有老目录）才使用新目录名。
-    let usingPrevious = false
-    try {
-      const appData = app.getPath('appData')
-      const previous = path.join(appData, PREVIOUS_APPDATA_DIR)
-      if (fs.existsSync(path.join(previous, 'mail-ai.db')) || fs.existsSync(path.join(previous, 'logs'))) {
-        app.setPath('userData', previous)
-        usingPrevious = true
-      }
-    } catch {
-      /* 判断失败就用默认目录，不影响启动 */
-    }
-    // 更老的目录（cuhk-mail-ai）只在「确实没有可用数据目录」时才搬，避免把旧快照复制进新目录
-    if (!usingPrevious) migrateLegacyUserData()
-    // 数据库文件名也统一成通用名（同目录改名，失败不影响使用）
-    normalizeDbFileName(app.getPath('userData'))
-  }  await app.whenReady()
+  // userData 路径已在模块加载阶段（单实例锁之前）应用过，这里无需重复
+  await app.whenReady()
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('app.hhmail.desktop')
@@ -309,19 +337,6 @@ async function main(): Promise<void> {
     // 只处理少量缺摘要的邮件，失败也只记日志；没有 API Key 时直接跳过。
     afterSync: async (reason) => {
       if (!ctx) return
-      // V2.3：进程内首次同步完成后做一次全量待办重建（老库升级后立刻能看到待办；之后只做增量）
-      if (!tasksStartupRebuilt) {
-        tasksStartupRebuilt = true
-        void (async () => {
-          try {
-            const mails = await ctx!.store.query({ limit: 5000, offset: 0 })
-            const res = await rebuildTasksForMessages({ store: ctx!.store, logger }, mails.map((m) => m.id))
-            logger.info('tasks.startup_rebuild', { messages: res.messages, tasks: res.tasks })
-          } catch (e) {
-            logger.warn('tasks.startup_rebuild.failed', { reason: e instanceof Error ? e.message : String(e) })
-          }
-        })()
-      }
       const settings = await ctx.settings.get()
       if (!settings.autoSummarizeNew || !settings.hasApiKey) return
       const res = await summarizePendingBatch(ctx, { limit: AUTO_SUMMARY_CATCHUP_LIMIT })
@@ -501,6 +516,22 @@ async function main(): Promise<void> {
     }, 30_000)
     ;(startupTimer as unknown as { unref?: () => void }).unref?.()
     app.on('will-quit', () => clearTimeout(startupTimer))
+  }
+
+  // ---------- V2.4 开机自动启动：启动时先按已保存的设置同步一次，避免"设置开了但没生效" ----------
+  {
+    const applyLaunchAtLogin = (enabled: boolean): void => {
+      const opts = applyLoginItem(enabled, (o) => app.setLoginItemSettings(o))
+      logger.info('app.launch_at_login', { enabled, openAtLogin: opts.openAtLogin })
+    }
+    if (ctx) ctx.applyLaunchAtLogin = applyLaunchAtLogin
+    void (async () => {
+      try {
+        if (ctx) applyLaunchAtLogin((await ctx.settings.get()).launchAtLogin)
+      } catch (e) {
+        logger.warn('app.launch_at_login.failed', { reason: e instanceof Error ? e.message : String(e) })
+      }
+    })()
   }
 
   // 标题/托盘名跟随设置里的品牌名（用户可改成自己学校的名字）

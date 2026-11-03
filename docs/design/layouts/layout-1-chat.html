@@ -1,0 +1,56 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>L1 聊天式</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f2f3f5;color:#111318;font-size:13px;overflow:hidden}
+.app{display:grid;grid-template-columns:64px 300px 1fr;height:100vh}
+.rail{background:#1f232b;display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 0}
+.rail .logo{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#5b8def,#22c1a4);display:grid;place-items:center;color:#fff;font-weight:800;margin-bottom:10px}
+.rail .r{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:17px;opacity:.55;color:#fff}
+.rail .r.on{background:rgba(255,255,255,.14);opacity:1}
+.chats{background:#fff;border-right:1px solid #e6e8ec;display:flex;flex-direction:column}
+.chats h2{font-size:16px;padding:18px 16px 10px;display:flex;align-items:center}
+.chats h2 .c{margin-left:6px;font-size:11px;color:#fff;background:#3b82f6;border-radius:99px;padding:1px 7px}
+.search{margin:0 14px 8px;background:#f2f3f5;border-radius:10px;padding:8px 11px;color:#8a90a0;font-size:12px}
+.conv{display:flex;gap:10px;padding:11px 14px;border-radius:12px;margin:1px 8px}
+.conv.on{background:#eef4ff}
+.conv .av{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;color:#fff;font-weight:700;flex:none}
+.conv .mn{min-width:0;flex:1}
+.conv .top{display:flex;gap:6px;align-items:baseline}
+.conv .nm{font-weight:700;font-size:13px}
+.conv .tm{margin-left:auto;font-size:10.5px;color:#9aa1b0}
+.conv .pv{font-size:12px;color:#6b7280;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv .dot{width:7px;height:7px;border-radius:50%;background:#3b82f6;margin-top:6px;flex:none}
+.chat{display:flex;flex-direction:column;background:#f7f8fa}
+.chat-head{height:60px;display:flex;align-items:center;gap:10px;padding:0 22px;background:#fff;border-bottom:1px solid #e6e8ec}
+.chat-head .av{width:32px;height:32px;border-radius:10px;background:#3b82f6;display:grid;place-items:center;color:#fff;font-weight:700}
+.chat-head .t{font-weight:700;font-size:13.5px}
+.chat-head .s{font-size:11px;color:#8a90a0}
+.chat-head .acts{margin-left:auto;display:flex;gap:8px}
+.chat-head .acts span{width:30px;height:30px;border-radius:9px;background:#f2f3f5;display:grid;place-items:center;font-size:13px}
+.msgs{flex:1;overflow:auto;padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:74%}
+.msg.in .bub{background:#fff;border:1px solid #e6e8ec;border-radius:16px 16px 16px 6px}
+.msg.out{align-self:flex-end}
+.msg.out .bub{background:#d8e7ff;border-radius:16px 16px 6px 16px}
+.bub{padding:12px 14px;font-size:13px;line-height:1.75}
+.bub .subj{font-weight:700;margin-bottom:6px}
+.bub .att{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.bub .att span{font-size:11px;background:rgba(0,0,0,.05);border-radius:7px;padding:5px 9px}
+.meta{font-size:10.5px;color:#9aa1b0;margin:5px 2px}
+.msg.out .meta{text-align:right}
+.composer{margin:0 22px 18px;background:#fff;border:1px solid #e6e8ec;border-radius:16px;padding:12px 14px;display:flex;align-items:center;gap:10px;color:#9aa1b0;font-size:12.5px}
+.composer .sp{flex:1}
+.composer .btn{background:#3b82f6;color:#fff;border-radius:9px;padding:6px 12px;font-size:12px;font-weight:600}
+</style></head><body><div class="app">
+<div class="rail"><div class="logo">H</div><div class="r on">📥</div><div class="r ">✨</div><div class="r ">✏️</div><div class="r ">📚</div><div class="r ">🗓</div><div class="r ">☑️</div><div class="r ">↗</div></div>
+<aside class="chats"><h2>收件箱<span class="c">3</span></h2><div class="search">🔍 搜索会话…</div>
+<div class="conv on"><div class="av" style="background:#3b82f6">林</div><div class="mn"><div class="top"><span class="nm">Prof. 林教授</span><span class="tm">10:53</span></div><div class="pv">附件里是我整理的时间表，下周三前把初稿发我看看。</div></div><div class="dot"></div></div><div class="conv "><div class="av" style="background:#0ea5e9">教</div><div class="mn"><div class="top"><span class="nm">教务处</span><span class="tm">09:20</span></div><div class="pv">本学期第二阶段选课将于 11 月 7 日 18:00 截止，请及时确认。</div></div><div class="dot"></div></div><div class="conv "><div class="av" style="background:#8b5cf6">图</div><div class="mn"><div class="top"><span class="nm">图书馆</span><span class="tm">昨天</span></div><div class="pv">本周五 15:30 在 SHB 123 举行系周会，会后有茶歇。</div></div><div class="dot"></div></div><div class="conv "><div class="av" style="background:#ef4444">IT</div><div class="mn"><div class="top"><span class="nm">IT 服务台</span><span class="tm">昨天</span></div><div class="pv">您借阅的《Computer Networks》将于 11 月 6 日到期。</div></div></div><div class="conv "><div class="av" style="background:#f59e0b">王</div><div class="mn"><div class="top"><span class="nm">王同学</span><span class="tm">周一</span></div><div class="pv">看到你也在选这门课，方便的话我们组个队？</div></div></div>
+</aside>
+<section class="chat">
+  <div class="chat-head"><div class="av">林</div><div><div class="t">Prof. 林教授</div><div class="s">关于毕业论文进度的沟通 · 3 封</div></div><div class="acts"><span>⭐</span><span>☑</span><span>⋯</span></div></div>
+  <div class="msgs">
+    <div class="msg in"><div class="bub"><div class="subj">关于毕业论文进度的沟通</div>老师好，附件里是我整理的时间表，下周三前把初稿发我看看。<div class="att"><span>📎 论文时间表.xlsx</span><span>📎 初稿模板.docx</span></div></div><div class="meta">Prof. 林教授 · 今天 10:53</div></div>
+    <div class="msg out"><div class="bub">收到老师，时间表我看了。第 2 章我会压缩，周三前把初稿发您邮箱。</div><div class="meta">我 · 今天 11:20</div></div>
+    <div class="msg in"><div class="bub">好的，另外实验部分的数据图记得加上误差线。</div><div class="meta">Prof. 林教授 · 今天 11:32</div></div>
+  </div>
+  <div class="composer"><span>回复 Prof. 林教授…</span><span class="sp"></span><span>📎</span><span class="btn">发送</span></div>
+</section></div></body></html>

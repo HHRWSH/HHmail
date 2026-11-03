@@ -8,6 +8,8 @@ import OpenAI from 'openai'
 import { DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, validateAiModel } from '../config'
 import { aiError, type AiProvider, type ChatParams } from './provider'
 import type { Logger } from '../logger'
+import { AppError, ErrorCodes } from '../../shared/error-codes'
+import { filterChatModelIds, parseModelsResponse } from '../../shared/aiModels'
 
 export interface DeepSeekConfig {
   apiKey: string
@@ -45,24 +47,58 @@ export interface DeepSeekProviderDeps {
   getConfig: () => Promise<DeepSeekConfig>
   factory?: (cfg: DeepSeekConfig) => ChatCompletionsClient
   logger?: Logger
+  /** 注入 fetch（单测用）；默认全局 fetch */
+  fetchImpl?: typeof fetch
 }
+
+/** 拉取 /models 的超时（毫秒） */
+const LIST_MODELS_TIMEOUT_MS = 10_000
 
 export class DeepSeekAiProvider implements AiProvider {
   private getConfig: () => Promise<DeepSeekConfig>
   private factory: (cfg: DeepSeekConfig) => ChatCompletionsClient
   private client: ChatCompletionsClient | null = null
   private logger?: Logger
+  private fetchImpl: typeof fetch
   private model: string
 
   constructor(deps: DeepSeekProviderDeps) {
     this.getConfig = deps.getConfig
     this.factory = deps.factory ?? createOpenAIClient
     this.logger = deps.logger
+    this.fetchImpl = deps.fetchImpl ?? (globalThis.fetch as typeof fetch)
     this.model = DEEPSEEK_MODEL
   }
 
   modelName(): string {
     return this.model
+  }
+
+  /**
+   * V2.4：拉取服务商 /models（OpenAI 兼容）——只返回模型 id，不暴露 Key。
+   * 用注入的 fetch 便于单测；非 2xx 给明确的中文提示（用户还可以手填模型名）。
+   */
+  async listModels(): Promise<string[]> {
+    const cfg = await this.getConfig()
+    const base = String(cfg.baseUrl ?? DEEPSEEK_BASE_URL).replace(/\/+$/, '')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), LIST_MODELS_TIMEOUT_MS)
+    try {
+      const res = await this.fetchImpl(base + '/models', {
+        method: 'GET',
+        headers: { authorization: 'Bearer ' + cfg.apiKey },
+        signal: controller.signal
+      })
+      if (!res.ok) {
+        throw new AppError(ErrorCodes.UNKNOWN, '获取模型列表失败（HTTP ' + res.status + '），可手动填写模型名')
+      }
+      const json = (await res.json()) as unknown
+      const ids = filterChatModelIds(parseModelsResponse(json))
+      if (ids.length === 0) throw new AppError(ErrorCodes.UNKNOWN, '服务商没有返回可用的模型列表')
+      return ids
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async ensureClient(): Promise<ChatCompletionsClient> {

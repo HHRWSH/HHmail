@@ -59,6 +59,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: WindowApi = {
+  platform: process.platform as WindowApi['platform'],
   getAuthStatus: (): Promise<AuthStatus> => invoke(IPC_CHANNELS.AUTH_STATUS),
   startDeviceCode: (): Promise<DeviceCodeInfo> => invoke(IPC_CHANNELS.AUTH_DEVICE_CODE),
   onDeviceCodeEvent: (cb: (event: DeviceCodeEvent) => void): (() => void) =>
@@ -116,15 +117,36 @@ const api: WindowApi = {
   /** 一键退订（V2.3） */
   unsubscribe: (id: number): Promise<{ ok: boolean; kind: string; detail: string }> =>
     invoke(IPC_CHANNELS.MAIL_UNSUBSCRIBE, { id }),
+  /** AI 模型列表（V2.4） */
+  listAiModels: (): Promise<string[]> => invoke(IPC_CHANNELS.AI_LIST_MODELS, {}),
   /** 待办（V2.3） */
+  /** 待办（V2.4 备忘录式） */
   listTasks: (): Promise<import('../shared/tasks').TaskItem[]> => invoke(IPC_CHANNELS.TASKS_LIST, {}),
-  createTask: (args: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<import('../shared/tasks').TaskItem> =>
-    invoke(IPC_CHANNELS.TASKS_CREATE, args),
-  updateTask: (args: { id: number; title?: string; dueTs?: number | null; done?: boolean }): Promise<import('../shared/tasks').TaskItem> =>
-    invoke(IPC_CHANNELS.TASKS_UPDATE, args),
+  getTask: (id: number): Promise<import('../shared/tasks').TaskItem | null> => invoke(IPC_CHANNELS.TASKS_GET, { id }),
+  createTask: (args: {
+    title?: string
+    body?: string
+    dueTs?: number | null
+    mailId?: number | null
+  }): Promise<import('../shared/tasks').TaskItem> => invoke(IPC_CHANNELS.TASKS_CREATE, args),
+  updateTask: (args: {
+    id: number
+    title?: string
+    body?: string
+    dueTs?: number | null
+    done?: boolean
+    checklist?: import('../shared/tasks').TaskChecklistItem[]
+  }): Promise<import('../shared/tasks').TaskItem> => invoke(IPC_CHANNELS.TASKS_UPDATE, args),
   deleteTask: (id: number): Promise<void> => invoke(IPC_CHANNELS.TASKS_DELETE, { id }),
-  rebuildTasks: (args?: { messageIds?: number[] }): Promise<{ messages: number; tasks: number; skipped: number }> =>
-    invoke(IPC_CHANNELS.TASKS_REBUILD, args ?? {}),
+  addTaskLink: (args: {
+    taskId: number
+    kind: import('../shared/tasks').TaskLinkKind
+    refId: string
+    label?: string
+    sub?: string
+  }): Promise<import('../shared/tasks').TaskItem> => invoke(IPC_CHANNELS.TASKS_LINK_ADD, args),
+  removeTaskLink: (args: { taskId: number; linkId: number }): Promise<import('../shared/tasks').TaskItem> =>
+    invoke(IPC_CHANNELS.TASKS_LINK_REMOVE, args),
   tagCounts: (): Promise<Array<{ tag: string; count: number }>> => invoke(IPC_CHANNELS.TAGS_COUNTS),
   tagExamples: (): Promise<TagExample[]> => invoke(IPC_CHANNELS.TAGS_EXAMPLES),
   clearManualTags: (id: number): Promise<void> => invoke(IPC_CHANNELS.TAGS_CLEAR_MANUAL, { id }),
@@ -204,6 +226,30 @@ const api: WindowApi = {
   snoozeMail: (id: number, until: number, note?: string): Promise<void> =>
     invoke(IPC_CHANNELS.MAIL_SNOOZE, { id, until, note }),
   cancelSnooze: (id: number): Promise<void> => invoke(IPC_CHANNELS.MAIL_CANCEL_SNOOZE, { id }),
+  /** 一键已读（V2.4） */
+  /** 鑷畾涔夋爣棰樻爮锛圴2.8锛夛細绐楀彛鎺у埗 */
+  windowMinimize: (): Promise<void> => invoke(IPC_CHANNELS.WINDOW_MINIMIZE, {}),
+  windowToggleMaximize: (): Promise<boolean> => invoke(IPC_CHANNELS.WINDOW_TOGGLE_MAXIMIZE, {}),
+  windowClose: (): Promise<void> => invoke(IPC_CHANNELS.WINDOW_CLOSE, {}),
+  windowIsMaximized: (): Promise<boolean> => invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, {}),
+  onWindowState: (cb: (maximized: boolean) => void): (() => boolean) => {
+    const listener = (_e: Electron.IpcRendererEvent, maximized: boolean): void => cb(maximized)
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_STATE, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_STATE, listener)
+      return true
+    }
+  },
+  /** 鎷︽埅鍙戜欢浜猴紙V2.7锛?*/
+  blockSenders: (): Promise<import('../shared/blocklist').BlockSender[]> => invoke(IPC_CHANNELS.MAIL_BLOCKLIST, {}),
+  blockSender: (args: { address: string; kind?: import('../shared/blocklist').BlockKind }): Promise<import('../shared/blocklist').BlockSender[]> =>
+    invoke(IPC_CHANNELS.MAIL_BLOCK_SENDER, args),
+  unblockSender: (id: number): Promise<import('../shared/blocklist').BlockSender[]> =>
+    invoke(IPC_CHANNELS.MAIL_UNBLOCK_SENDER, { id }),
+  unblockAddress: (address: string): Promise<import('../shared/blocklist').BlockSender[]> =>
+    invoke(IPC_CHANNELS.MAIL_UNBLOCK_ADDRESS, { address }),
+  markAllRead: (folder?: string): Promise<number> =>
+    invoke(IPC_CHANNELS.MAIL_MARK_ALL_READ, folder === undefined ? {} : { folder }),
   bulkMarkRead: (ids: number[], read: boolean): Promise<void> => invoke(IPC_CHANNELS.MAIL_BULK_READ, { ids, read }),
   bulkAddLabels: (ids: number[], labelIds: number[]): Promise<void> => invoke(IPC_CHANNELS.MAIL_BULK_LABEL, { ids, labelIds }),
   listDrafts: (): Promise<MailDraft[]> => invoke(IPC_CHANNELS.DRAFTS_LIST),

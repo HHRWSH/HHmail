@@ -22,7 +22,9 @@ import { buildFtsQuery, buildFtsQueryFromTokens, buildLikePattern, buildLikePatt
 import { rankByTerms } from '../../shared/retrievalRank'
 import type { WeightedTerm } from '../../shared/retrievalQuery'
 import type { ThreadIndexEntry } from '../mail/thread'
-import type { TaskCandidate, TaskItem } from '../../shared/tasks'
+import { normalizeChecklist } from '../../shared/tasks'
+import type { TaskChecklistItem, TaskItem, TaskLink, TaskLinkKind } from '../../shared/tasks'
+import { isBlockedByRules, type BlockKind, type BlockSender } from '../../shared/blocklist'
 import type { CalendarSourceMail } from '../../shared/calendar'
 
 const ACCOUNT_ID = 1 // MVP 单账户
@@ -49,6 +51,7 @@ interface MessageRow {
   starred: number
   flagged?: number
   snooze_until: number | null
+  blocked?: number
 }
 
 interface AttachmentRow {
@@ -86,6 +89,7 @@ function rowToList(row: MessageRow): MailListItem {
     starred: (row.starred ?? 0) === 1,
     flagged: (row.flagged ?? 0) === 1,
     snoozeUntil: row.snooze_until ?? null,
+    blocked: (row.blocked ?? 0) === 1
   }
 }
 
@@ -381,6 +385,12 @@ export class SqliteMessageStore implements MessageStore {
     const labelIds = params.labelIds ?? []
     const where: string[] = ['m.folder = ?', '(? = 0 OR m.is_read = 0)']
     const bind: (string | number)[] = [folder, params.unreadOnly ? 1 : 0]
+    // V2.7：被拦截发件人的邮件默认不进列表/计数（折叠到「已拦截」视图时才查）
+    if (params.blockedOnly) {
+      where.push('m.blocked = 1')
+    } else {
+      where.push('m.blocked = 0')
+    }
     if (labelIds.length > 0) {
       where.push(`EXISTS (SELECT 1 FROM message_labels ml WHERE ml.message_id = m.id AND ml.label_id IN (${labelIds.map(() => '?').join(',')}))`)
       bind.push(...labelIds)
@@ -1619,6 +1629,13 @@ export class SqliteMessageStore implements MessageStore {
 
   // ---- V2 M7：批量操作 ----
 
+  async markAllRead(folder: string = 'INBOX'): Promise<number> {
+    const info = this.db
+      .prepare('UPDATE messages SET is_read = 1 WHERE account_id = ? AND folder = ? AND is_read = 0')
+      .run(ACCOUNT_ID, folder)
+    return Number(info.changes) || 0
+  }
+
   async bulkMarkRead(ids: number[], read: boolean): Promise<void> {
     const stmt = this.db.prepare('UPDATE messages SET is_read = ? WHERE id = ?')
     const tx = this.db.transaction(() => {
@@ -1737,116 +1754,131 @@ export class SqliteMessageStore implements MessageStore {
     this.db.prepare('DELETE FROM sent_items WHERE id = ?').run(id)
   }
 
-  // ---------------- 待办（V2.3） ----------------
+  // ---------------- 待办（V2.4 备忘录式：标题 + 正文 + 清单 + 引用） ----------------
 
-  /** 行 → TaskItem（关联邮件主题/发件人） */
+  /** tasks 行 + 关联的清单/引用 → TaskItem */
   private mapTaskRow(r: {
     id: number
-    message_id: number | null
     title: string
+    body: string | null
     due_ts: number | null
-    source: string
+    checklist: string | null
     done: number
     created_at: number
     updated_at: number
-    subject?: string | null
-    from_name?: string | null
-  }): TaskItem {
+  }, links: TaskLink[]): TaskItem {
     return {
       id: r.id,
-      messageId: r.message_id,
       title: r.title,
+      body: r.body ?? '',
       dueTs: r.due_ts,
-      source: r.source === 'card' || r.source === 'manual' ? r.source : 'summary',
       done: r.done === 1,
+      checklist: SqliteMessageStore.parseChecklist(r.checklist),
+      links,
       createdAt: r.created_at,
-      updatedAt: r.updated_at,
-      subject: r.subject ?? null,
-      fromName: r.from_name ?? null
+      updatedAt: r.updated_at
     }
+  }
+
+  /** checklist 列（JSON 字符串）→ 规范化数组；坏数据一律当空 */
+  private static parseChecklist(raw: string | null): TaskChecklistItem[] {
+    if (!raw) return []
+    try {
+      return normalizeChecklist(JSON.parse(raw) as unknown)
+    } catch {
+      return []
+    }
+  }
+
+  /** 一次取出多张待办的清单引用（避免 N+1） */
+  private linksFor(taskIds: number[]): Map<number, TaskLink[]> {
+    const map = new Map<number, TaskLink[]>()
+    if (taskIds.length === 0) return map
+    for (const chunk of chunkIds(taskIds)) {
+      const placeholders = chunk.map(() => '?').join(',')
+      const rows = this.db
+        .prepare(
+          `SELECT id, task_id, kind, ref_id, label, sub FROM task_links
+           WHERE task_id IN (${placeholders}) ORDER BY id ASC`
+        )
+        .all(...chunk) as Array<{ id: number; task_id: number; kind: string; ref_id: string; label: string | null; sub: string | null }>
+      for (const row of rows) {
+        const list = map.get(row.task_id) ?? []
+        list.push({
+          id: row.id,
+          taskId: row.task_id,
+          kind: row.kind === 'mail' ? 'mail' : 'datetime',
+          refId: row.ref_id,
+          label: row.label,
+          sub: row.sub
+        })
+        map.set(row.task_id, list)
+      }
+    }
+    return map
   }
 
   async listTasks(): Promise<TaskItem[]> {
     const rows = this.db
       .prepare(
-        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
-                m.subject AS subject, m.from_name AS from_name
-         FROM tasks t LEFT JOIN messages m ON m.id = t.message_id
-         ORDER BY CASE WHEN t.done = 1 THEN 1 ELSE 0 END,
-                  CASE WHEN t.due_ts IS NULL THEN 1 ELSE 0 END,
-                  t.due_ts ASC, t.created_at DESC`
+        `SELECT id, title, body, due_ts, checklist, done, created_at, updated_at FROM tasks
+         ORDER BY CASE WHEN done = 1 THEN 1 ELSE 0 END,
+                  CASE WHEN due_ts IS NULL THEN 1 ELSE 0 END,
+                  due_ts ASC, updated_at DESC`
       )
       .all() as Parameters<SqliteMessageStore['mapTaskRow']>[0][]
-    return rows.map((r) => this.mapTaskRow(r))
+    const links = this.linksFor(rows.map((r) => r.id))
+    return rows.map((r) => this.mapTaskRow(r, links.get(r.id) ?? []))
   }
 
-  async tasksForMessages(ids: number[]): Promise<TaskItem[]> {
-    if (ids.length === 0) return []
-    const out: TaskItem[] = []
-    for (const chunk of chunkIds(ids)) {
-      const placeholders = chunk.map(() => '?').join(',')
-      const rows = this.db
-        .prepare(
-          `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
-                  m.subject AS subject, m.from_name AS from_name
-           FROM tasks t LEFT JOIN messages m ON m.id = t.message_id
-           WHERE t.message_id IN (${placeholders})`
-        )
-        .all(...chunk) as Parameters<SqliteMessageStore['mapTaskRow']>[0][]
-      out.push(...rows.map((r) => this.mapTaskRow(r)))
-    }
-    return out
+  async getTask(id: number): Promise<TaskItem | null> {
+    const row = this.db
+      .prepare(`SELECT id, title, body, due_ts, checklist, done, created_at, updated_at FROM tasks WHERE id = ?`)
+      .get(id) as Parameters<SqliteMessageStore['mapTaskRow']>[0] | undefined
+    if (!row) return null
+    return this.mapTaskRow(row, this.linksFor([id]).get(id) ?? [])
   }
 
-  async replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void> {
+  async createTask(input: {
+    title?: string
+    body?: string
+    dueTs?: number | null
+    mailId?: number | null
+  }): Promise<TaskItem> {
     const now = Date.now()
-    const tx = this.db.transaction(() => {
-      for (const chunk of chunkIds(messageIds)) {
-        const placeholders = chunk.map(() => '?').join(',')
-        this.db
-          .prepare(`DELETE FROM tasks WHERE source != 'manual' AND message_id IN (${placeholders})`)
-          .run(...chunk)
-      }
-      const insert = this.db.prepare(
-        `INSERT INTO tasks (message_id, title, due_ts, source, done, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      for (const t of tasks) {
-        insert.run(t.messageId, t.title.slice(0, 300), t.dueTs ?? null, t.source, t.done ? 1 : 0, now, now)
-      }
-    })
-    tx()
-  }
-
-  async createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem> {
-    const now = Date.now()
+    const title = String(input.title ?? '').trim().slice(0, 200) || '未命名待办'
+    const body = String(input.body ?? '').trim().slice(0, 20_000)
     const info = this.db
       .prepare(
-        `INSERT INTO tasks (message_id, title, due_ts, source, done, created_at, updated_at)
-         VALUES (?, ?, ?, 'manual', 0, ?, ?)`
+        `INSERT INTO tasks (message_id, title, body, due_ts, checklist, source, done, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '[]', 'manual', 0, ?, ?)`
       )
-      .run(input.messageId ?? null, String(input.title).trim().slice(0, 300), input.dueTs ?? null, now, now)
+      .run(input.mailId ?? null, title, body, input.dueTs ?? null, now, now)
     const id = Number(info.lastInsertRowid)
-    const list = await this.tasksForMessages(input.messageId ? [input.messageId] : [])
-    const created = list.find((t) => t.id === id)
-    if (created) return created
-    // 手动任务（无关联邮件）不在 tasksForMessages 的结果里 → 直接按 id 查一次
-    const row = this.db
-      .prepare(
-        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
-                NULL AS subject, NULL AS from_name
-         FROM tasks t WHERE t.id = ?`
-      )
-      .get(id) as Parameters<SqliteMessageStore['mapTaskRow']>[0]
-    return this.mapTaskRow(row)
+    // 从邮件创建时，顺带把该邮件作为引用挂上（用户主动点击「加入待办」）
+    if (input.mailId) {
+      const mail = await this.getMessage(input.mailId).catch(() => null)
+      if (mail) {
+        const sub = [mail.fromName || mail.fromAddr, mail.dateLabel || ''].filter(Boolean).join(' · ')
+        await this.addTaskLink(id, { kind: 'mail', refId: String(input.mailId), label: mail.subject, sub })
+      }
+    }
+    return (await this.getTask(id)) as TaskItem
   }
 
-  async updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem> {
+  async updateTask(
+    id: number,
+    patch: { title?: string; body?: string; dueTs?: number | null; done?: boolean; checklist?: TaskChecklistItem[] }
+  ): Promise<TaskItem> {
     const sets: string[] = ['updated_at = ?']
     const bind: unknown[] = [Date.now()]
     if (patch.title !== undefined) {
       sets.push('title = ?')
-      bind.push(String(patch.title).trim().slice(0, 300))
+      bind.push(String(patch.title).trim().slice(0, 200) || '未命名待办')
+    }
+    if (patch.body !== undefined) {
+      sets.push('body = ?')
+      bind.push(String(patch.body).slice(0, 20_000))
     }
     if (patch.dueTs !== undefined) {
       sets.push('due_ts = ?')
@@ -1856,39 +1888,126 @@ export class SqliteMessageStore implements MessageStore {
       sets.push('done = ?')
       bind.push(patch.done ? 1 : 0)
     }
+    if (patch.checklist !== undefined) {
+      sets.push('checklist = ?')
+      bind.push(JSON.stringify(patch.checklist))
+    }
     bind.push(id)
     this.db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...bind)
-    const row = this.db
-      .prepare(
-        `SELECT t.id, t.message_id, t.title, t.due_ts, t.source, t.done, t.created_at, t.updated_at,
-                m.subject AS subject, m.from_name AS from_name
-         FROM tasks t LEFT JOIN messages m ON m.id = t.message_id WHERE t.id = ?`
-      )
-      .get(id) as Parameters<SqliteMessageStore['mapTaskRow']>[0]
-    return this.mapTaskRow(row)
+    const task = await this.getTask(id)
+    if (!task) throw new Error(`task ${id} not found`)
+    return task
   }
 
   async deleteTask(id: number): Promise<void> {
-    this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM task_links WHERE task_id = ?').run(id)
+      this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    })
+    tx()
   }
 
-  async getIndexDocsFor(
-    ids: number[]
-  ): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>> {
-    if (ids.length === 0) return []
-    const out: Array<{ messageId: number; card: string; dueTs: number | null; subject: string }> = []
-    for (const chunk of chunkIds(ids)) {
-      const placeholders = chunk.map(() => '?').join(',')
-      const rows = this.db
+  async addTaskLink(
+    taskId: number,
+    link: { kind: TaskLinkKind; refId: string; label?: string | null; sub?: string | null }
+  ): Promise<TaskItem> {
+    this.db
+      .prepare(
+        `INSERT INTO task_links (task_id, kind, ref_id, label, sub, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(task_id, kind, ref_id) DO UPDATE SET label=excluded.label, sub=excluded.sub`
+      )
+      .run(taskId, link.kind, String(link.refId), link.label ?? null, link.sub ?? null, Date.now())
+    this.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(Date.now(), taskId)
+    const task = await this.getTask(taskId)
+    if (!task) throw new Error(`task ${taskId} not found`)
+    return task
+  }
+
+  async removeTaskLink(taskId: number, linkId: number): Promise<TaskItem> {
+    this.db.prepare('DELETE FROM task_links WHERE id = ? AND task_id = ?').run(linkId, taskId)
+    this.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(Date.now(), taskId)
+    const task = await this.getTask(taskId)
+    if (!task) throw new Error(`task ${taskId} not found`)
+    return task
+  }
+
+  // ---------------- 拦截发件人（V2.7：本地黑名单 + 折叠） ----------------
+
+  /** 全部规则（按创建时间倒序，新的在前） */
+  async listBlockSenders(): Promise<BlockSender[]> {
+    const rows = this.db
+      .prepare('SELECT id, kind, value, created_at FROM block_senders ORDER BY created_at DESC, id DESC')
+      .all() as Array<{ id: number; kind: string; value: string; created_at: number }>
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind === 'domain' ? 'domain' : 'email',
+      value: r.value,
+      createdAt: r.created_at
+    }))
+  }
+
+  /** 新增规则（幂等）+ 全量重算 blocked */
+  async addBlockSender(input: { kind: BlockKind; value: string }): Promise<BlockSender[]> {
+    const value = String(input.value ?? '').trim().toLowerCase()
+    if (value) {
+      this.db
         .prepare(
-          `SELECT d.message_id, d.card, d.due_ts, COALESCE(m.subject, '') AS subject
-           FROM mail_index_docs d LEFT JOIN messages m ON m.id = d.message_id
-           WHERE d.message_id IN (${placeholders})`
+          `INSERT INTO block_senders (kind, value, created_at) VALUES (?, ?, ?)
+           ON CONFLICT(kind, value) DO NOTHING`
         )
-        .all(...chunk) as Array<{ message_id: number; card: string; due_ts: number | null; subject: string }>
-      out.push(...rows.map((r) => ({ messageId: r.message_id, card: r.card, dueTs: r.due_ts, subject: r.subject })))
+        .run(input.kind, value, Date.now())
     }
-    return out
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  /** 删除规则 + 全量重算 */
+  async removeBlockSender(id: number): Promise<BlockSender[]> {
+    this.db.prepare('DELETE FROM block_senders WHERE id = ?').run(id)
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  /** 删除命中该发件人的所有规则（邮箱精确 + 域名规则） */
+  async removeBlockRulesForAddress(address: string): Promise<BlockSender[]> {
+    const addr = address.trim().toLowerCase()
+    if (addr) {
+      const domain = addr.includes('@') ? addr.slice(addr.indexOf('@') + 1) : addr
+      this.db
+        .prepare(
+          `DELETE FROM block_senders
+           WHERE (kind = 'email' AND value = ?) OR (kind = 'domain' AND value = ?)`
+        )
+        .run(addr, domain)
+    }
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  /**
+   * 按当前规则全量重算 messages.blocked。
+   * 只在标记变化时才 UPDATE（几百封邮件的量级，一次同步跑一遍是毫秒级）。
+   */
+  async applyBlockRules(): Promise<number> {
+    const rules = await this.listBlockSenders()
+    const rows = this.db.prepare('SELECT id, from_addr, blocked FROM messages').all() as Array<{
+      id: number
+      from_addr: string | null
+      blocked: number
+    }>
+    let changed = 0
+    const update = this.db.prepare('UPDATE messages SET blocked = ? WHERE id = ?')
+    const tx = this.db.transaction(() => {
+      for (const row of rows) {
+        const next = isBlockedByRules(row.from_addr ?? '', rules) ? 1 : 0
+        if ((row.blocked ?? 0) !== next) {
+          update.run(next, row.id)
+          changed += 1
+        }
+      }
+    })
+    tx()
+    return changed
   }
 
   close(): void {

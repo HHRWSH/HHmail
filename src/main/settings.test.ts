@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SafeStorageSettingsStore,
   SETTINGS_KEY_MODEL,
+  SETTINGS_KEY_UI_STYLE,
   SETTINGS_KEY_MODEL_MIGRATED,
   SETTINGS_KEY_PROMPT_MIGRATED,
   SETTINGS_KEY_REFRESH_INTERVAL,
@@ -143,20 +144,24 @@ describe('SafeStorageSettingsStore（设置加密落盘）', () => {
   it('存储的刷新间隔键名稳定', () => {
     expect(SETTINGS_KEY_REFRESH_INTERVAL).toBe('sync.interval')
   })
-  it('V2.2 模型校验：DeepSeek 只留 deepseek-flash；老模型名自动落回默认', async () => {
+  it('V2.4 模型校验：允许服务商新模型；非法/弃用名字仍拒绝', async () => {
     const safe = new FakeSafeStorage()
     const repo = new FakeSettingsRepo()
-    // 模拟老用户：存的是已下线的 deepseek-v4-pro
+    // 老用户存的自定义模型名（服务商后来上的新模型）现在**保留**，不再被强制落回默认
     repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:deepseek-v4-pro`, 'utf8').toString('base64'))
     const s = new SafeStorageSettingsStore(safe, repo)
     const cfg = await s.get()
     expect(cfg.aiProvider).toBe('deepseek')
-    expect(cfg.aiModel).toBe('deepseek-flash')
-    // 已落盘纠正
-    expect(repo.store.has(SETTINGS_KEY_MODEL)).toBe(true)
+    expect(cfg.aiModel).toBe('deepseek-v4-pro')
 
-    // DeepSeek 其它模型名现在会被拒绝（用户要求只保留 v4.1 flash）
-    await expect(s.set({ aiModel: 'deepseek-v4-pro' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+    // 新模型名允许保存（V2.4：自定义模型入口）
+    await s.set({ aiModel: 'deepseek-v3.2' })
+    expect((await s.get()).aiModel).toBe('deepseek-v3.2')
+
+    // 非法模型名（含空格）仍然拒绝
+    await expect(s.set({ aiModel: 'bad model' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+    // 弃用模型名仍然拒绝
+    await expect(s.set({ aiModel: 'deepseek-chat' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
 
     // 换成别的服务商：模型自动落回该服务商默认值，切换后可用
     await s.set({ aiProvider: 'zhipu' })
@@ -189,17 +194,23 @@ describe('SafeStorageSettingsStore（设置加密落盘）', () => {
     expect(await s.getApiKey()).toBeNull()
   })
 
-  it('已失效的模型名（deepseek-v4.1 / deepseek-v4.1-flash）自动回落到新默认', async () => {
+  it('弃用/非法模型名仍自愈落回默认；合法的新模型名保留', async () => {
     const repo = new FakeSettingsRepo()
-    repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:deepseek-v4.1`, 'utf8').toString('base64'))
+    // 弃用名 deepseek-chat → 回落到默认
+    repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:deepseek-chat`, 'utf8').toString('base64'))
     const s = new SafeStorageSettingsStore(new FakeSafeStorage(), repo)
     expect((await s.get()).aiModel).toBe('deepseek-flash')
+    expect(repo.store.has(SETTINGS_KEY_MODEL)).toBe(true)
 
-    // API 已下线的名字也要能自愈并落盘
-    repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:deepseek-v4.1-flash`, 'utf8').toString('base64'))
+    // 非法（带空格）→ 回落到默认
+    repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:bad model`, 'utf8').toString('base64'))
     const cfg2 = await s.get()
     expect(cfg2.aiModel).toBe('deepseek-flash')
-    expect(repo.store.has(SETTINGS_KEY_MODEL)).toBe(true)
+
+    // 合法的新模型名（服务商新上线）→ 原样保留，不再被清成默认
+    repo.store.set(SETTINGS_KEY_MODEL, Buffer.from(`enc:deepseek-v4.1-flash`, 'utf8').toString('base64'))
+    const cfg3 = await s.get()
+    expect(cfg3.aiModel).toBe('deepseek-v4.1-flash')
   })
 
   it('历史默认提示词只比哈希：命中即迁移，自定义提示词不动（V2.2 去私人信息）', async () => {
@@ -251,5 +262,25 @@ describe('SafeStorageSettingsStore（设置加密落盘）', () => {
     await s2.set({ summaryPrompt: '我的自定义提示词：只写三行' })
     repo2.store.delete('ai.prompt_migrated_v5')
     expect((await s2.get()).summaryPrompt).toBe('我的自定义提示词：只写三行')
+  })
+
+  it('V2.6 视觉风格：写入并持久化；非法值回退 apple', async () => {
+    const s = new SafeStorageSettingsStore(new FakeSafeStorage(), new FakeSettingsRepo())
+    expect((await s.get()).uiStyle).toBe('apple')
+    await s.set({ uiStyle: 'linear' })
+    expect((await s.get()).uiStyle).toBe('linear')
+    const repo = new FakeSettingsRepo()
+    repo.store.set(SETTINGS_KEY_UI_STYLE, Buffer.from('enc:rounded-corner', 'utf8').toString('base64'))
+    const s2 = new SafeStorageSettingsStore(new FakeSafeStorage(), repo)
+    expect((await s2.get()).uiStyle).toBe('apple')
+  })
+
+  it('V2.10 开机自启：写入并持久化，默认关闭', async () => {
+    const s = new SafeStorageSettingsStore(new FakeSafeStorage(), new FakeSettingsRepo())
+    expect((await s.get()).launchAtLogin).toBe(false)
+    await s.set({ launchAtLogin: true })
+    expect((await s.get()).launchAtLogin).toBe(true)
+    await s.set({ launchAtLogin: false })
+    expect((await s.get()).launchAtLogin).toBe(false)
   })
 })

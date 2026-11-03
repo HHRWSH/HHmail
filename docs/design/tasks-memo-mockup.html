@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<title>HHmail · 待办（备忘录式）设计预览</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-2: #fbfbfc;
+    --text: #191b1f;
+    --muted: #6b7280;
+    --border: rgba(17, 24, 39, 0.08);
+    --border-strong: rgba(17, 24, 39, 0.14);
+    --accent: #2f6fed;
+    --accent-soft: rgba(47, 111, 237, 0.09);
+    --accent-line: #2f6fed;
+    --danger: #e5484d;
+    --warn: #e08a00;
+    --ok: #2f9e6e;
+    --note: #fffefb;
+    --radius: 12px;
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-md: 0 6px 20px rgba(16, 24, 40, 0.08);
+    --sidebar: #fbfbfd;
+  }
+  [data-theme="dark"] {
+    --bg: #0e1014;
+    --panel: #16191f;
+    --panel-2: #12151a;
+    --text: #e7e9ee;
+    --muted: #99a1ac;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --accent: #7ea4ff;
+    --accent-soft: rgba(126, 164, 255, 0.12);
+    --accent-line: #7ea4ff;
+    --danger: #ff6b6f;
+    --warn: #ffc35c;
+    --ok: #57d197;
+    --note: #1a1e25;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 8px 26px rgba(0, 0, 0, 0.45);
+    --sidebar: #11141a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display: grid; grid-template-columns: 208px 1fr; height: 100vh; }
+
+  /* ---------- 侧边栏 ---------- */
+  .sidebar {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    padding: 14px 10px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 6px 10px 14px; }
+  .brand .logo {
+    width: 24px; height: 24px; border-radius: 7px;
+    background: linear-gradient(135deg, #2f6fed, #22c1a4);
+    display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700;
+  }
+  .brand .name { font-weight: 650; font-size: 13.5px; letter-spacing: 0.2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 10px; border-radius: 8px; color: var(--text);
+    opacity: 0.82; cursor: default; font-size: 13px;
+  }
+  .nav-item .ico { width: 18px; text-align: center; opacity: 0.9; }
+  .nav-item .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); opacity: 1; font-weight: 600; }
+  .nav-item.active .count { color: var(--accent); }
+  .nav-sep { height: 1px; background: var(--border); margin: 10px 6px; }
+
+  /* ---------- 主区 ---------- */
+  .workspace { display: flex; flex-direction: column; min-width: 0; }
+  .page-head {
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 22px 14px; border-bottom: 1px solid var(--border);
+  }
+  .page-head h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: 0.2px; }
+  .page-head .sub { color: var(--muted); font-size: 12px; }
+  .head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .btn {
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text);
+    padding: 6px 12px; border-radius: 8px; font-size: 12.5px; cursor: default;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #fff; box-shadow: var(--shadow-sm); }
+  .seg { display: flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+  .seg span { padding: 4px 11px; border-radius: 7px; font-size: 12px; color: var(--muted); }
+  .seg span.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm); font-weight: 600; }
+
+  .split { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+
+  /* ---------- 左：列表 ---------- */
+  .list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .search { padding: 12px 14px 8px; }
+  .search .box {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 7px 10px; color: var(--muted); font-size: 12.5px;
+  }
+  .list { overflow: hidden; padding: 6px 8px 12px; }
+  .list-row {
+    position: relative; display: flex; gap: 10px; align-items: flex-start;
+    padding: 11px 11px 11px 13px; border-radius: 10px; cursor: default;
+  }
+  .list-row:hover { background: var(--pane-hover, rgba(127, 127, 127, 0.05)); }
+  .list-row.selected { background: var(--accent-soft); }
+  .list-row.selected::before {
+    content: ""; position: absolute; left: 4px; top: 12px; bottom: 12px; width: 3px;
+    border-radius: 3px; background: var(--accent-line);
+  }
+  .check {
+    width: 16px; height: 16px; margin-top: 2px; border-radius: 50%;
+    border: 1.6px solid var(--border-strong); flex: none; display: grid; place-items: center;
+    font-size: 10px; color: #fff;
+  }
+  .check.done { background: var(--ok); border-color: var(--ok); }
+  .row-main { min-width: 0; flex: 1; }
+  .row-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-snippet { font-size: 11.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-meta { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px; border-radius: 6px; font-size: 10.5px;
+    background: rgba(127, 127, 127, 0.12); color: var(--muted);
+  }
+  .badge.due { background: rgba(224, 138, 0, 0.12); color: var(--warn); font-weight: 600; }
+  .badge.overdue { background: rgba(229, 72, 77, 0.12); color: var(--danger); font-weight: 600; }
+  .badge.ok { background: rgba(47, 158, 110, 0.12); color: var(--ok); }
+  .row.done .row-title { text-decoration: line-through; opacity: 0.5; }
+
+  /* ---------- 右：详情（备忘录卡片） ---------- */
+  .detail-pane { padding: 18px 22px 22px; overflow: hidden; display: flex; flex-direction: column; gap: 12px; }
+  .memo {
+    background: var(--note); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: var(--shadow-md); padding: 22px 24px 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .memo-top { display: flex; align-items: center; gap: 10px; }
+  .memo-top .tag { font-size: 11px; color: var(--muted); }
+  .memo-top .acts { margin-left: auto; display: flex; gap: 6px; }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+    border: 1px solid var(--border); background: var(--panel); font-size: 13px; color: var(--muted);
+  }
+  .memo h2 { margin: 0; font-size: 19px; font-weight: 680; letter-spacing: 0.2px; }
+  .memo .body { font-size: 13px; line-height: 1.75; color: var(--text); opacity: 0.92; white-space: pre-line; }
+  .divider { height: 1px; background: var(--border); }
+
+  .section-label { font-size: 11px; color: var(--muted); letter-spacing: 0.6px; text-transform: uppercase; }
+  .todos { display: flex; flex-direction: column; gap: 7px; }
+  .todo { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+  .todo .box2 {
+    width: 15px; height: 15px; border-radius: 4px; border: 1.6px solid var(--border-strong);
+    display: grid; place-items: center; font-size: 10px; color: #fff; flex: none;
+  }
+  .todo.done .box2 { background: var(--ok); border-color: var(--ok); }
+  .todo.done .txt { text-decoration: line-through; opacity: 0.5; }
+
+  .links { display: flex; flex-direction: column; gap: 8px; }
+  .link-chip {
+    display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  .link-chip .kind {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    font-size: 13px; background: var(--accent-soft); color: var(--accent); flex: none;
+  }
+  .link-chip.cal .kind { background: rgba(47, 158, 110, 0.12); color: var(--ok); }
+  .link-chip .li { min-width: 0; }
+  .link-chip .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .link-chip .s { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .link-chip .open { margin-left: auto; font-size: 11px; color: var(--accent); flex: none; }
+  .add-link {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+    border: 1px dashed var(--border-strong); background: transparent; border-radius: 9px;
+    padding: 7px 10px; width: fit-content;
+  }
+
+  .memo-foot { display: flex; align-items: center; gap: 10px; padding-top: 2px; }
+  .memo-foot .due { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warn); font-weight: 600; }
+  .memo-foot .spacer { flex: 1; }
+  .memo-foot .btn { font-size: 12px; }
+  .memo-foot .btn.danger { color: var(--danger); border-color: rgba(229, 72, 77, 0.35); }
+
+  .hintbar {
+    font-size: 11.5px; color: var(--muted); padding: 2px 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .kbd {
+    font: 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 3px 5px;
+    border-radius: 5px; border: 1px solid var(--border-strong); background: var(--panel-2);
+  }
+  .theme-toggle { position: fixed; right: 14px; bottom: 12px; font-size: 11px; opacity: 0.5; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">H</div><div class="name">HHmail</div></div>
+    <div class="nav-item"><span class="ico">📥</span><span>收件箱</span><span class="count">12</span></div>
+    <div class="nav-item"><span class="ico">✉️</span><span>已发送</span></div>
+    <div class="nav-item"><span class="ico">📝</span><span>草稿</span><span class="count">1</span></div>
+    <div class="nav-sep"></div>
+    <div class="nav-item active"><span class="ico">☑️</span><span>待办</span><span class="count">4</span></div>
+    <div class="nav-item"><span class="ico">🗓</span><span>日历</span></div>
+    <div class="nav-item"><span class="ico">🤖</span><span>AI 问答</span></div>
+    <div class="nav-item"><span class="ico">📚</span><span>知识库</span></div>
+    <div class="nav-sep"></div>
+    <div class="nav-item"><span class="ico">⚙️</span><span>设置</span></div>
+  </aside>
+
+  <main class="workspace">
+    <header class="page-head">
+      <h1>待办</h1>
+      <span class="sub">4 件未完成 · 1 件今天到期</span>
+      <div class="head-actions">
+        <div class="seg"><span class="on">今天</span><span>本周</span><span>全部</span><span>已完成</span></div>
+        <button class="btn primary">＋ 新建待办</button>
+      </div>
+    </header>
+
+    <div class="split">
+      <section class="list-pane">
+        <div class="search"><div class="box"><span>🔍</span><span>搜索待办、邮件、日历…</span></div></div>
+        <div class="list">
+          <div class="list-row selected">
+            <div class="check"></div>
+            <div class="row-main">
+              <div class="row-title">提交 Experiment 1 报告</div>
+              <div class="row-snippet">实验数据已经跑完，把图 3 的误差线重画一下再交。</div>
+              <div class="row-meta">
+                <span class="badge due">今天 23:59</span>
+                <span class="badge">📧 2</span>
+                <span class="badge">🗓 1</span>
+              </div>
+            </div>
+          </div>
+          <div class="list-row">
+            <div class="check"></div>
+            <div class="row-main">
+              <div class="row-title">回复 TA 关于 Lab 2 的问题</div>
+              <div class="row-snippet">TA 问预分配的大小，顺便说明我用的编译参数。</div>
+              <div class="row-meta">
+                <span class="badge overdue">逾期 · 昨天</span>
+                <span class="badge">📧 1</span>
+              </div>
+            </div>
+          </div>
+          <div class="list-row">
+            <div class="check"></div>
+            <div class="row-main">
+              <div class="row-title">预约图书馆讨论室（周三晚）</div>
+              <div class="row-snippet">组会改到周三 19:00，提前订 3 小时。</div>
+              <div class="row-meta">
+                <span class="badge due">周三 19:00</span>
+                <span class="badge">🗓 2</span>
+              </div>
+            </div>
+          </div>
+          <div class="list-row">
+            <div class="check"></div>
+            <div class="row-main">
+              <div class="row-title">周五前把打印发票交给实验室</div>
+              <div class="row-snippet">（手动记录，未关联邮件）</div>
+              <div class="row-meta"><span class="badge due">周五前</span></div>
+            </div>
+          </div>
+          <div class="list-row done">
+            <div class="check done">✓</div>
+            <div class="row-main">
+              <div class="row-title">已完成：选课确认</div>
+              <div class="row-snippet">教务系统已确认，不再处理。</div>
+              <div class="row-meta"><span class="badge ok">已完成</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail-pane">
+        <div class="memo">
+          <div class="memo-top">
+            <span class="tag">待办 · 今天 23:59</span>
+            <div class="acts">
+              <div class="icon-btn">✓</div>
+              <div class="icon-btn">⋯</div>
+            </div>
+          </div>
+          <h2>提交 Experiment 1 报告</h2>
+          <div class="body">实验数据已经跑完，把图 3 的误差线重画一下再交。
+需要附上实验记录（第 2 页改了采样率那版），别交错文件。</div>
+
+          <div class="divider"></div>
+
+          <div class="section-label">清单</div>
+          <div class="todos">
+            <div class="todo done"><div class="box2">✓</div><div class="txt">重画图 3 误差线</div></div>
+            <div class="todo"><div class="box2"></div><div class="txt">补第 2 页的采样率说明</div></div>
+            <div class="todo"><div class="box2"></div><div class="txt">导出 PDF 并检查页数</div></div>
+          </div>
+
+          <div class="section-label">引用</div>
+          <div class="links">
+            <div class="link-chip">
+              <div class="kind">📧</div>
+              <div class="li">
+                <div class="t">Experiment 1 提交说明与评分标准</div>
+                <div class="s">林教授 · 10-14 09:12 · 含 2 个附件</div>
+              </div>
+              <div class="open">打开 ›</div>
+            </div>
+            <div class="link-chip">
+              <div class="kind">📧</div>
+              <div class="li">
+                <div class="t">Re: Experiment 1 数据核对</div>
+                <div class="s">TA · 10-15 20:03 · 讨论图 3 的异常点</div>
+              </div>
+              <div class="open">打开 ›</div>
+            </div>
+            <div class="link-chip cal">
+              <div class="kind">🗓</div>
+              <div class="li">
+                <div class="t">Experiment 1 报告截止</div>
+                <div class="s">10-16 23:59 · 来源：日历事件</div>
+              </div>
+              <div class="open">查看 ›</div>
+            </div>
+            <div class="add-link">＋ 引用邮件 / 日历事件</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="memo-foot">
+            <span class="due">⏰ 今天 23:59</span>
+            <span class="spacer"></span>
+            <button class="btn">设为完成</button>
+            <button class="btn danger">删除</button>
+          </div>
+        </div>
+        <div class="hintbar">
+          <span class="kbd">⌘</span><span class="kbd">N</span> 新建 · <span class="kbd">↑↓</span> 切换 · 勾选即保存
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="theme-toggle">按 <b>T</b> 切换亮/暗 · 静态设计预览</div>
+<script>
+  // 仅用于预览：T 键切换亮/暗、点行切换选中（无业务逻辑）
+  const rows = [...document.querySelectorAll('.list-row')]
+  rows.forEach((r) => r.addEventListener('click', () => rows.forEach((x) => x.classList.toggle('selected', x === r))))
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 't' || e.key === 'T') {
+      const el = document.documentElement
+      el.dataset.theme = el.dataset.theme === 'light' ? 'dark' : 'light'
+    }
+  })
+</script>
+</body>
+</html>

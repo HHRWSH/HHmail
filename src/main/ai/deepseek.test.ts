@@ -61,7 +61,7 @@ describe('DeepSeekAiProvider（openai SDK 不直接进入测试，注入 fake cl
     await expect(provider.complete({ system: 's', user: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
   })
 
-  it('V2.2：DeepSeek 只放行 deepseek-flash（其余 DeepSeek 模型与下线名字都被拒绝）', async () => {
+  it('V2.4：自定义/新模型名放行（服务商经常上新），但非法字符仍拒绝', async () => {
     const ok = new DeepSeekAiProvider({
       getConfig: async () => ({ apiKey: 'sk-test', model: 'deepseek-flash' }),
       factory: () => fakeClient()
@@ -69,21 +69,22 @@ describe('DeepSeekAiProvider（openai SDK 不直接进入测试，注入 fake cl
     await expect(ok.complete({ system: 's', user: 'u' })).resolves.toBe('你好')
     expect(ok.modelName()).toBe('deepseek-flash')
 
-    // 用户要求下线 DeepSeek 的其它模型
-    for (const gone of ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
-      const legacy = new DeepSeekAiProvider({
-        getConfig: async () => ({ apiKey: 'sk-test', model: gone, providerId: 'deepseek' }),
+    // V2.4：用户手填的新模型名（服务商新上的型号）允许使用
+    for (const fresh of ['deepseek-v3.2', 'deepseek-v4-pro', 'deepseek-v4.1-flash']) {
+      const p = new DeepSeekAiProvider({
+        getConfig: async () => ({ apiKey: 'sk-test', model: fresh, providerId: 'deepseek' }),
         factory: () => fakeClient()
       })
-      await expect(legacy.complete({ system: 's', user: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+      await expect(p.complete({ system: 's', user: 'u' })).resolves.toBe('你好')
+      expect(p.modelName()).toBe(fresh)
     }
-    // 已下线/内测的模型名不再放行（设置层会自动回落到官方默认，不会走到这里）
-    for (const gone of ['deepseek-v4.1', 'deepseek-v4.1-flash']) {
-      const legacy = new DeepSeekAiProvider({
-        getConfig: async () => ({ apiKey: 'sk-test', model: gone }),
+    // 非法模型名（含空格/尖括号等）仍然拒绝，避免把奇怪字符串带进请求
+    for (const bad of ['bad model', '<script>', '模型名']) {
+      const p = new DeepSeekAiProvider({
+        getConfig: async () => ({ apiKey: 'sk-test', model: bad }),
         factory: () => fakeClient()
       })
-      await expect(legacy.complete({ system: 's', user: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+      await expect(p.complete({ system: 's', user: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
     }
   })
 
@@ -135,5 +136,49 @@ describe('DeepSeekAiProvider（openai SDK 不直接进入测试，注入 fake cl
       factory: () => fakeClient({ reply: undefined })
     })
     expect(await provider.complete({ system: 's', user: 'u' })).toBe('')
+  })
+})
+
+describe('DeepSeekAiProvider —— 拉取最新模型列表（V2.4 /models）', () => {
+  const makeProvider = (fetchImpl: typeof fetch) =>
+    new DeepSeekAiProvider({
+      getConfig: async () => ({ apiKey: 'sk-test', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash' }),
+      factory: () => fakeClient(),
+      fetchImpl
+    })
+
+  it('解析 { data: [{ id }] }，过滤 embedding 等非对话模型', async () => {
+    let calledUrl = ''
+    let auth = ''
+    const fetchImpl = (async (url: unknown, init?: { headers?: Record<string, string> }) => {
+      calledUrl = String(url)
+      auth = init?.headers?.authorization ?? ''
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: 'deepseek-flash' }, { id: 'deepseek-v3.2' }, { id: 'bge-embedding' }] })
+      } as unknown as Response
+    }) as unknown as typeof fetch
+    const models = await makeProvider(fetchImpl).listModels()
+    expect(models).toEqual(['deepseek-flash', 'deepseek-v3.2'])
+    expect(calledUrl).toBe('https://api.deepseek.com/models')
+    expect(auth).toBe('Bearer sk-test')
+  })
+
+  it('非 2xx → 中文错误（可手填模型名）', async () => {
+    const fetchImpl = (async () => ({ ok: false, status: 401, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch
+    await expect(makeProvider(fetchImpl).listModels()).rejects.toThrow(/HTTP 401/)
+  })
+
+  it('返回空列表 → 明确报错，不静默', async () => {
+    const fetchImpl = (async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }) as unknown as Response) as unknown as typeof fetch
+    await expect(makeProvider(fetchImpl).listModels()).rejects.toThrow(/没有返回可用/)
+  })
+
+  it('网络异常 → 抛错（由 IPC 层转成中文提示）', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('network down')
+    }) as unknown as typeof fetch
+    await expect(makeProvider(fetchImpl).listModels()).rejects.toThrow(/network down/)
   })
 })

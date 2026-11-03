@@ -61,6 +61,7 @@ export const setFlaggedSchema = z.object({ id: z.number().int().positive(), flag
 
 /** 计数：与 listMails 相同的筛选条件（无需 limit/offset） */
 export const countMailsSchema = z.object({
+  blockedOnly: z.boolean().optional(),
   folder: z.string().min(1).max(200).optional(),
   labelIds: z.array(z.number().int().positive()).max(50).optional(),
   starredOnly: z.boolean().optional(),
@@ -79,45 +80,86 @@ export const listEventsSchema = z
 
 /** 自动更新：无参数（检查/下载/安装都不接受渲染层传入的 URL） */
 export const updateEmptySchema = z.object({}).strict()
+/** 绐楀彛鎺у埗锛堣嚜瀹氫箟鏍囬鏍忥紝V2.8锛夛細鏃犲弬鏁?*/
+export const windowControlSchema = z.object({}).strict()
 
 export const updateCheckSchema = z.object({ manual: z.boolean().optional() }).strict()
 
 /** 一键退订：只按邮件 id 发起（地址从邮件头解析，渲染层不能自定义 URL） */
 export const unsubscribeSchema = z.object({ id: z.number().int().positive() }).strict()
 
-// ---- 待办（V2.3） ----
-/** 新建任务：标题 1..300；dueTs 可为 null（无截止）；可关联邮件 */
+// ---- 待办（V2.4 备忘录式） ----
+/** 待办标题：可空（主进程兜底「未命名待办」）；最多 200 字 */
 export const taskCreateSchema = z
   .object({
-    title: z.string().trim().min(1).max(300),
+    title: z.string().trim().max(200).optional(),
+    body: z.string().max(20_000).optional(),
     dueTs: z.number().int().nonnegative().nullable().optional(),
-    messageId: z.number().int().positive().nullable().optional()
+    /** 从某封邮件创建时顺带挂引用 */
+    mailId: z.number().int().positive().nullable().optional()
+  })
+  .strict()
+
+/** 清单子项（id 由前端生成；后端会规范化） */
+const checklistItemSchema = z
+  .object({
+    id: z.string().max(64).optional(),
+    text: z.string().trim().min(1).max(200),
+    done: z.boolean().optional()
   })
   .strict()
 
 export const taskUpdateSchema = z
   .object({
     id: z.number().int().positive(),
-    title: z.string().trim().min(1).max(300).optional(),
+    title: z.string().trim().max(200).optional(),
+    body: z.string().max(20_000).optional(),
     dueTs: z.number().int().nonnegative().nullable().optional(),
-    done: z.boolean().optional()
+    done: z.boolean().optional(),
+    checklist: z.array(checklistItemSchema).max(100).optional()
   })
   .strict()
 
 export const taskIdSchema = z.object({ id: z.number().int().positive() }).strict()
 
-/** 重建待办：不传 messageIds = 全量重建 */
-export const taskRebuildSchema = z
-  .object({ messageIds: z.array(z.number().int().positive()).max(2000).optional() })
+/** 加引用：mail 的 refId 是 messages.id；datetime 的 refId 是毫秒时间戳字符串 */
+export const taskLinkAddSchema = z
+  .object({
+    taskId: z.number().int().positive(),
+    kind: z.enum(['mail', 'datetime']),
+    refId: z.string().trim().min(1).max(64),
+    label: z.string().trim().max(300).optional(),
+    sub: z.string().trim().max(300).optional()
+  })
+  .strict()
+
+export const taskLinkRemoveSchema = z
+  .object({ taskId: z.number().int().positive(), linkId: z.number().int().positive() })
   .strict()
 
 export const syncMailSchema = z.object({
   folders: z.array(z.string().min(1).max(200)).max(10).optional()
 })
 
+/** 一键已读：folder 可省略（默认 INBOX） */
+export const blockSenderSchema = z
+  .object({
+    address: z.string().trim().min(3).max(200),
+    kind: z.enum(['email', 'domain']).optional()
+  })
+  .strict()
+
+export const unblockSenderSchema = z.object({ id: z.number().int().positive() }).strict()
+export const unblockAddressSchema = z.object({ address: z.string().trim().min(3).max(200) }).strict()
+
+export const markAllReadSchema = z.object({ folder: z.string().trim().min(1).max(200).optional() }).strict()
+
 export const getMailSchema = z.object({
   id: z.number().int().positive()
 })
+
+/** AI 模型列表：无参数 */
+export const listAiModelsSchema = z.object({}).strict()
 
 export const aiSummarizeSchema = z.object({
   id: z.number().int().positive()
@@ -338,7 +380,16 @@ export const setSettingsSchema = z.object({
   attachmentDir: z.string().max(400).optional(),
   // V2.2 自动标签
   autoTagEnabled: z.boolean().optional(),
-  tagVocabulary: z.string().max(600).optional()
+  tagVocabulary: z.string().max(600).optional(),
+  // V2.3 / V2.4 / V2.6 新增设置（之前漏了这些字段 → zod 默认会 strip，导致「设置保存了但不生效」）
+  showRemoteImages: z.boolean().optional(),
+  sendScope: z.boolean().optional(),
+  autoCheckUpdate: z.boolean().optional(),
+  launchAtLogin: z.boolean().optional(),
+  dndEnabled: z.boolean().optional(),
+  dndStart: z.string().max(5).optional(),
+  dndEnd: z.string().max(5).optional(),
+  uiStyle: z.enum(['apple', 'linear', 'notion', 'paper', 'glass']).optional()
 })
 
 /** 附件保存：id + partId（partId 可为空串，主进程会按需回填） */

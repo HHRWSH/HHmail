@@ -1,76 +1,75 @@
 /**
- * 待办（V2.3）：把「邮件里的截止/行动项」变成可勾选的任务。
+ * 待办（V2.4 备忘录式）—— 纯逻辑与类型。
  *
- * 数据来源（零 AI 成本，只用已有产物）：
- *   1) 索引卡片的 `[DUE]` → 一条「截止」任务（标题 = 邮件主题）；
- *   2) 已存摘要里「## 截止与行动项」的 Markdown 列表 → 每条一行任务（`- [ ] xxx —— 截止：YYYY-MM-DD HH:mm`）。
- * 两路按「同邮件 + 同标题 + 同截止」去重；手动新增的任务（source='manual'）不参与重建、不会被覆盖。
- *
- * 时区约定：与日历一致 —— 所有时间按**北京时间**分桶（`cnParts` 等来自 shared/calendar），
- * 避免 UTC 与本地时区混算导致"今天到期"错位（CI 是 UTC，这个坑踩过）。
+ * 设计（用户确认的方案）：
+ *   - 待办 = 用户自己写的「备忘录卡片」：标题 + 正文 + 可增删的清单子项 + 引用（邮件 / 自定义时间）；
+ *   - **不再自动从卡片 DUE / 摘要行动项生成**：全部由用户手动新建，或从邮件详情「加入待办」、
+ *     摘要行动项「→ 待办」显式创建（都是用户主动点击）；
+ *   - 时间分桶/逾期判断仍按**北京时间**，跨时区稳定（CI 是 UTC 也不漂）。
  */
-import { cnDayEnd, cnDayStart, cnParts, type CalendarEventKind } from './calendar'
+import { cnDayEnd, cnDayStart, cnParts } from './calendar'
 
-export type TaskSource = 'card' | 'summary' | 'manual'
+/** 待办里的一条清单子项 */
+export interface TaskChecklistItem {
+  id: string
+  text: string
+  done: boolean
+}
 
-/** 待办条目（主进程返回给渲染层的形状，含原邮件信息便于跳转/展示） */
+/** 引用类型：邮件 / 自定义时间（用户确认：不做"日历事件列表"选择） */
+export type TaskLinkKind = 'mail' | 'datetime'
+
+/** 待办引用（挂在一张待办卡上） */
+export interface TaskLink {
+  id: number
+  taskId: number
+  kind: TaskLinkKind
+  /** mail: messages.id 的字符串；datetime: 毫秒时间戳字符串 */
+  refId: string
+  /** 展示用：邮件主题 / 时间说明 */
+  label: string | null
+  /** 展示用：发件人+时间 / 备注 */
+  sub: string | null
+}
+
+/** 待办卡（主进程返回给渲染层的形状） */
 export interface TaskItem {
   id: number
-  /** 关联邮件（手动任务可为空） */
-  messageId: number | null
   title: string
-  /** 截止时间（毫秒时间戳）；null = 没有明确截止 */
+  body: string
   dueTs: number | null
-  source: TaskSource
   done: boolean
+  checklist: TaskChecklistItem[]
+  links: TaskLink[]
   createdAt: number
   updatedAt: number
-  /** 关联邮件的主题/发件人（手动任务为 null） */
-  subject?: string | null
-  fromName?: string | null
 }
 
-/** 解析出来的一条候选任务（还没有 id） */
-export interface ParsedTask {
-  title: string
-  dueTs: number | null
-  done: boolean
-}
-
-/** 带邮件来源的候选任务（重建时用） */
-export interface TaskCandidate extends ParsedTask {
-  messageId: number
-  source: Exclude<TaskSource, 'manual'>
-}
-
-/** 待办筛选范围 */
+/** 筛选范围 */
 export type TaskRange = 'today' | 'week' | 'all' | 'done'
 
-/** 去掉清单符号与多余空白，用于标题归一化比较 */
-function normalizeTitle(raw: string): string {
-  return raw
-    .replace(/^[-*+]\s+/, '')
-    .replace(/^\[[ xX]\]\s*/, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[：:]\s*$/, '')
-    .trim()
-}
+/** 清单子项上限（防止一屏塞爆） */
+export const MAX_CHECKLIST_ITEMS = 100
+/** 清单子项文字上限 */
+export const MAX_CHECKLIST_TEXT = 200
+/** 标题/正文上限（与 zod 保持一致） */
+export const MAX_TASK_TITLE = 200
+export const MAX_TASK_BODY = 20_000
 
-/**
- * 解析「YYYY-MM-DD HH:mm」（或 `YYYY/MM/DD`、`MM-DD HH:mm`，缺年份用 fallbackYear）
- * 返回北京时间对应的绝对时间戳；无法解析返回 null。
- */
+// ---------------------------------------------------------------------------
+// 时间解析与文案（与旧版一致，摘要行动项 / 手动时间都用它）
+// ---------------------------------------------------------------------------
+
+/** 解析「YYYY-MM-DD HH:mm」等 → 北京时间对应时间戳；无法解析返回 null */
 export function parseDueText(raw: string, fallbackYear: number): number | null {
   const text = String(raw ?? '').trim()
   if (!text) return null
-  // 2026-09-16 14:42 / 2026/9/16 14:42 / 2026年9月16日 14:42
   let m = /(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:\s*(\d{1,2})[:：](\d{2}))?/.exec(text)
   if (m) {
     const [, y, mo, d, h, mi] = m
     const ts = Date.UTC(Number(y), Number(mo) - 1, Number(d), h ? Number(h) - 8 : 15, mi ? Number(mi) : 59)
     return Number.isFinite(ts) ? ts : null
   }
-  // 09-16 14:42 / 9/16 14:42（无年份 → 用邮件年份）
   m = /(?<![\d/:])(\d{1,2})[-/](\d{1,2})(?:\s*(\d{1,2})[:：](\d{2}))?/.exec(text)
   if (m) {
     const [, mo, d, h, mi] = m
@@ -80,75 +79,38 @@ export function parseDueText(raw: string, fallbackYear: number): number | null {
   return null
 }
 
-/**
- * 从摘要 Markdown 解析行动项：
- *   - [ ] 提交 Experiment 1 —— 截止：2026-09-16 23:59
- *   - [x] 已完成的保留 done=true（界面筛选「已完成」用）
- * 没有 `截止：` 的行也保留（dueTs=null），标题取该行正文。
- * 只认 `## 截止与行动项`/`## 行动项` 小节内的列表项，避免把「关键信息」里的列表也当成任务。
- */
-export function parseActionItems(summaryMarkdown: string, fallbackYear: number): ParsedTask[] {
+/** 从摘要 Markdown 解析「## 截止与行动项」里的行动项（供「→ 待办」入口用） */
+export function parseActionItems(summaryMarkdown: string, fallbackYear: number): Array<{ title: string; dueTs: number | null; done: boolean }> {
   const text = String(summaryMarkdown ?? '')
   if (!text.trim()) return []
-  const lines = text.split(/\r?\n/)
-  const out: ParsedTask[] = []
+  const out: Array<{ title: string; dueTs: number | null; done: boolean }> = []
   let inSection = false
-  for (const raw of lines) {
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim()
     if (/^#{1,6}\s*/.test(line)) {
-      const heading = line.replace(/^#{1,6}\s*/, '')
-      inSection = /(截止|行动项|待办|to-?do)/i.test(heading)
+      inSection = /(截止|行动项|待办|to-?do)/i.test(line.replace(/^#{1,6}\s*/, ''))
       continue
     }
     if (!inSection) continue
     const m = /^[-*+]\s+\[([ xX])\]\s*(.+)$/.exec(line)
     if (!m) continue
-    const done = m[1].toLowerCase() === 'x'
     const body = m[2].trim()
-    // 截止信息：全角/半角冒号、`—— 截止：`、`(截止: ...)` 都兼容
     const dueMatch = /(?:截止|到期|due)\s*[:：]?\s*([^)）\n]+)/i.exec(body)
     let title = body
     let dueTs: number | null = null
     if (dueMatch) {
       dueTs = parseDueText(dueMatch[1], fallbackYear)
-      // 标题里去掉「—— 截止：…」这一段，避免任务名里重复出现时间
       title = body.slice(0, dueMatch.index).replace(/[\s—\-–:：]+$/, '').trim()
     }
-    title = normalizeTitle(title)
+    title = title.replace(/^[-*+]\s+/, '').replace(/\s+/g, ' ').trim()
     if (!title) continue
-    out.push({ title, dueTs, done })
+    out.push({ title, dueTs, done: m[1].toLowerCase() === 'x' })
   }
   return out
 }
 
-/** 去重键：同邮件 + 同标题（归一化）+ 同截止 */
-export function taskKey(t: { messageId: number | null; title: string; dueTs: number | null }): string {
-  return `${t.messageId ?? 'm'}|${normalizeTitle(t.title)}|${t.dueTs ?? 0}`
-}
-
-/**
- * 合并候选任务并去重：同 key 保留**摘要**来源（摘要里的行动项标题更具体、通常带截止；
- * 卡片来源只是「邮件主题 + DUE」的粗粒度兜底）。
- */
-export function mergeTaskCandidates(candidates: TaskCandidate[]): TaskCandidate[] {
-  const byKey = new Map<string, TaskCandidate>()
-  for (const c of candidates) {
-    const key = taskKey(c)
-    const prev = byKey.get(key)
-    if (!prev) {
-      byKey.set(key, c)
-      continue
-    }
-    const prefer = (x: TaskCandidate): number => (x.source === 'summary' ? 1 : 0)
-    if (prefer(c) > prefer(prev)) byKey.set(key, c)
-    // 任一来源标记完成 → 视为完成
-    else if (c.done && !prev.done) byKey.set(key, { ...prev, done: true })
-  }
-  return [...byKey.values()]
-}
-
 /** 是否逾期：有截止、未完成、且已过期 */
-export function isOverdue(t: Pick<TaskItem, 'dueTs' | 'done'>, now: number): boolean {
+export function isOverdue(t: { dueTs: number | null; done: boolean }, now: number): boolean {
   return Boolean(t.dueTs) && !t.done && (t.dueTs as number) < now
 }
 
@@ -156,14 +118,13 @@ export function isOverdue(t: Pick<TaskItem, 'dueTs' | 'done'>, now: number): boo
 export function cnWeekStart(now: number): number {
   const { y, mo, d } = cnParts(now)
   const dayStart = Date.UTC(y, mo - 1, d) - 8 * 3_600_000
-  // getUTCDay 基于北京时间的日期：0=周日 → 周一为一周起点
   const weekday = new Date(Date.UTC(y, mo - 1, d)).getUTCDay()
   const back = weekday === 0 ? 6 : weekday - 1
   return dayStart - back * 86_400_000
 }
 
-/** 按筛选范围过滤（已完成的单独一档） */
-export function filterTasksByRange(tasks: TaskItem[], range: TaskRange, now: number): TaskItem[] {
+/** 按筛选范围过滤（已完成单独一档） */
+export function filterTasksByRange<T extends { dueTs: number | null; done: boolean }>(tasks: T[], range: TaskRange, now: number): T[] {
   if (range === 'done') return tasks.filter((t) => t.done)
   const open = tasks.filter((t) => !t.done)
   if (range === 'all') return open
@@ -172,20 +133,19 @@ export function filterTasksByRange(tasks: TaskItem[], range: TaskRange, now: num
     const end = cnDayEnd(now)
     return open.filter((t) => t.dueTs !== null && t.dueTs >= start && t.dueTs <= end)
   }
-  // 本周（周一至周日）
   const start = cnWeekStart(now)
   const end = start + 7 * 86_400_000 - 1
   return open.filter((t) => t.dueTs !== null && t.dueTs >= start && t.dueTs <= end)
 }
 
-/** 排序：逾期/有截止的在前（按截止升序），无截止的按创建时间倒序 */
-export function sortTasks(tasks: TaskItem[]): TaskItem[] {
+/** 排序：未完成在前、截止升序、无截止按更新时间倒序 */
+export function sortTasks<T extends { dueTs: number | null; done: boolean; updatedAt: number }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
     if (a.done !== b.done) return a.done ? 1 : -1
     if (a.dueTs !== null && b.dueTs !== null) return a.dueTs - b.dueTs
     if (a.dueTs !== null) return -1
     if (b.dueTs !== null) return 1
-    return b.createdAt - a.createdAt
+    return b.updatedAt - a.updatedAt
   })
 }
 
@@ -200,10 +160,88 @@ export function formatTaskDue(dueTs: number | null, now: number): string {
   return `${String(p.mo).padStart(2, '0')}-${String(p.d).padStart(2, '0')} ${hhmm}`
 }
 
-/** 给界面用的空任务模板（避免各处重复造对象） */
-export function emptyTaskDraft(): { title: string; dueTs: number | null } {
-  return { title: '', dueTs: null }
+/** 本地时间 → datetime-local 输入值 */
+export function tsToLocalInput(ts: number | null): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// 导出给测试/主进程复用的类型别名（保持 shared 自洽）
-export type { CalendarEventKind }
+/** datetime-local 输入值 → 毫秒时间戳；空串 → null */
+export function localInputToTs(value: string): number | null {
+  if (!value) return null
+  const ts = new Date(value).getTime()
+  return Number.isFinite(ts) ? ts : null
+}
+
+// ---------------------------------------------------------------------------
+// 清单子项（纯函数，便于单测与 IPC 校验）
+// ---------------------------------------------------------------------------
+
+/** 生成一个清单子项 id（本地唯一即可） */
+export function newChecklistId(seed: number = Date.now()): string {
+  return `c${seed.toString(36)}${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** 规范化清单（去空行、截断超长、去掉重复 id），最多 MAX_CHECKLIST_ITEMS 条 */
+export function normalizeChecklist(raw: unknown): TaskChecklistItem[] {
+  if (!Array.isArray(raw)) return []
+  const out: TaskChecklistItem[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as { id?: unknown; text?: unknown; done?: unknown }
+    const text = String(rec.text ?? '').trim().slice(0, MAX_CHECKLIST_TEXT)
+    if (!text) continue
+    let id = String(rec.id ?? '').trim()
+    if (!id || seen.has(id)) id = newChecklistId(out.length + 1)
+    seen.add(id)
+    out.push({ id, text, done: rec.done === true })
+    if (out.length >= MAX_CHECKLIST_ITEMS) break
+  }
+  return out
+}
+
+/** 追加一条清单子项（空文字不追加） */
+export function appendChecklistItem(list: TaskChecklistItem[], text: string): TaskChecklistItem[] {
+  const t = String(text ?? '').trim().slice(0, MAX_CHECKLIST_TEXT)
+  if (!t || list.length >= MAX_CHECKLIST_ITEMS) return list
+  return [...list, { id: newChecklistId(list.length + 1), text: t, done: false }]
+}
+
+/** 切换某条子项的完成状态 */
+export function toggleChecklistItem(list: TaskChecklistItem[], id: string): TaskChecklistItem[] {
+  return list.map((item) => (item.id === id ? { ...item, done: !item.done } : item))
+}
+
+/** 删除某条子项 */
+export function removeChecklistItem(list: TaskChecklistItem[], id: string): TaskChecklistItem[] {
+  return list.filter((item) => item.id !== id)
+}
+
+/** 修改某条子项文字（空文字 → 删除该条） */
+export function updateChecklistItem(list: TaskChecklistItem[], id: string, text: string): TaskChecklistItem[] {
+  const t = String(text ?? '').trim().slice(0, MAX_CHECKLIST_TEXT)
+  if (!t) return removeChecklistItem(list, id)
+  return list.map((item) => (item.id === id ? { ...item, text: t } : item))
+}
+
+/** 清单完成度（用于列表行上的「2/3」提示） */
+export function checklistProgress(list: TaskChecklistItem[]): { done: number; total: number } {
+  return { done: list.filter((i) => i.done).length, total: list.length }
+}
+
+/** 列表行的摘要文字：优先取正文第一行，其次清单第一条 */
+export function taskPreview(task: Pick<TaskItem, 'body' | 'checklist'>): string {
+  const body = String(task.body ?? '').trim()
+  if (body) return body.split('\n')[0].trim().slice(0, 120)
+  const first = task.checklist[0]
+  return first ? first.text : ''
+}
+
+/** 搜索/过滤用的纯文本（标题 + 正文 + 清单 + 引用标签） */
+export function taskSearchText(task: TaskItem): string {
+  const parts = [task.title, task.body, ...task.checklist.map((c) => c.text), ...task.links.map((l) => `${l.label ?? ''} ${l.sub ?? ''}`)]
+  return parts.join(' ').toLowerCase()
+}

@@ -14,6 +14,7 @@ import {
   askInboxSchema,
   bulkLabelSchema,
   bulkReadSchema,
+  markAllReadSchema,
   cancelSnoozeSchema,
   createLabelSchema,
   deleteDraftSchema,
@@ -28,13 +29,18 @@ import {
   pickDirectorySchema,
   countMailsSchema,
   listEventsSchema,
+  listAiModelsSchema,
   unsubscribeSchema,
+  blockSenderSchema,
+  unblockSenderSchema,
+  unblockAddressSchema,
   updateEmptySchema,
   updateCheckSchema,
   taskCreateSchema,
   taskUpdateSchema,
   taskIdSchema,
-  taskRebuildSchema,
+  taskLinkAddSchema,
+  taskLinkRemoveSchema,
   setFlaggedSchema,
   categoryCreateSchema,
   categoryUpdateSchema,
@@ -73,12 +79,19 @@ import type { AppSettings, IpcResult, NewMailEvent, SendMailArgs, SetSettingsArg
 import type { AppContext } from './bootstrap'
 import type { Logger } from './logger'
 import { plainFromHtml } from './mail/mime'
-import { rebuildTasksForMessages } from './tasks/rebuild'
+import { normalizeChecklist, type TaskLinkKind } from '../shared/tasks'
+import { inferRuleKind, normalizeRuleValue } from '../shared/blocklist'
 import { deriveRuleTags, parseAiTags, parseVocabulary } from '../shared/tags'
 import { describeProbeResult, probeSmtpAuth } from './mail/smtpProbe'
 import { describeSendResult, sendSmtpMail, type SmtpSendResult } from './mail/smtpSend'
 import { SMTP_HOST, SMTP_PORT } from './config'
-import { shouldNotifyNewMail, buildNotificationBody, buildNotificationTitle } from './notifications'
+import {
+  shouldNotifyNewMail,
+  buildNotificationBody,
+  buildNotificationTitle,
+  isNewMailBurst,
+  describeNewMailBurst
+} from './notifications'
 import { shouldShowSystemNotification } from '../shared/dnd'
 import { parseUnsubscribe, ONE_CLICK_BODY } from '../shared/unsubscribe'
 
@@ -154,8 +167,6 @@ async function summarizeOne(
   if (!result.degraded) {
     await ctx.store.saveSummary(id, result.text, model)
   }
-  // V2.3：摘要更新后重建这封邮件的待办（摘要行动项 → 任务）
-  await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, [id]).catch(() => undefined)
   // M1 双产物：再生成一份「给 AI 检索用的索引卡片」并入库（失败不影响摘要）
   await buildIndexCardFor(ctx, id, mail.threadId)
   return { text: result.text, threadId: result.threadId, messageCount: thread.length, model, savedAtMs: Date.now(), degraded: result.degraded }
@@ -228,9 +239,13 @@ export async function handleNewMails(
 // 统一策略（shared/dnd）：用户手动触发（manual*）静默；免打扰窗口内静默；其余弹系统通知。
   // 注意：无论弹不弹，下面都会推送 mail:new 事件让界面刷新 —— 免打扰只是"不打扰"，不是"不更新"。
   const settingsSnapshot = await ctx.settings.get()
+  // V2.4：一次来太多新邮件（订阅轰炸/批量转发）→ 完全不弹系统通知，避免刷屏；
+  // 界面照旧刷新、未读照旧计数、角标照旧更新。
+  const burst = isNewMailBurst(newUids.length)
   const notify =
     opts.notify ??
-    (shouldNotifyNewMail(opts.reason) &&
+    (!burst &&
+      shouldNotifyNewMail(opts.reason) &&
       shouldShowSystemNotification({
         reason: opts.reason,
         dndEnabled: settingsSnapshot.dndEnabled,
@@ -238,9 +253,13 @@ export async function handleNewMails(
         dndEnd: settingsSnapshot.dndEnd,
         nowMs: Date.now()
       }))
+  if (burst && opts.notify !== false) {
+    ctx.logger.info('newmail.notify.burst_skipped', { count: newUids.length, detail: describeNewMailBurst(newUids.length) })
+  }
   const all = await ctx.store.query({ limit: 1000, offset: 0 })
   for (const uid of newUids) {
     const item = all.find((m) => m.uid === uid)
+    // V2.7锛氳鎷︽埅鍙戜欢浜虹殑閭欢涓嶅叆閫氱煡/鎽樿锛堜粛浼氱敱鍚屾鍏ュ簱銆佹姌鍙犲湪銆屽凡鎷︽埅銆嶉噷锛塦n    if (item.blocked) continue
     if (!item) continue
 
     let summary: string | null = null
@@ -264,7 +283,7 @@ export async function handleNewMails(
             { systemPrompt: settings.summaryPrompt }
           )
           await ctx.store.saveSummary(item.id, res.text, ctx.ai.modelName())
-          await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, [item.id]).catch(() => undefined)
+
           summary = res.text
           // M1：同步维护检索索引卡片（失败不影响通知）
           await buildIndexCardFor(ctx, item.id, mail.threadId)
@@ -556,6 +575,56 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     })
   )
 
+  // ---- 拦截发件人（V2.7：本地黑名单 + 折叠，不改服务器） ----
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_BLOCKLIST,
+    wrap(ctx, null, async () => ctx.store.listBlockSenders())
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_BLOCK_SENDER,
+    wrap(ctx, blockSenderSchema, async (args: { address: string; kind?: 'email' | 'domain' }) => {
+      const kind = args.kind ?? inferRuleKind(args.address)
+      const value = normalizeRuleValue(kind, args.address)
+      if (!value) throw new AppError(ErrorCodes.VALIDATION_FAILED, '地址格式不正确，请填写完整邮箱或域名。')
+      const rules = await ctx.store.addBlockSender({ kind, value })
+      ctx.refreshUnreadBadge?.()
+      ctx.logger.info('mail.block_sender', { kind, value, rules: rules.length })
+      return rules
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_UNBLOCK_SENDER,
+    wrap(ctx, unblockSenderSchema, async (args: { id: number }) => {
+      const rules = await ctx.store.removeBlockSender(args.id)
+      ctx.refreshUnreadBadge?.()
+      ctx.logger.info('mail.unblock_sender', { id: args.id, rules: rules.length })
+      return rules
+    })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_UNBLOCK_ADDRESS,
+    wrap(ctx, unblockAddressSchema, async (args: { address: string }) => {
+      const rules = await ctx.store.removeBlockRulesForAddress(args.address)
+      ctx.refreshUnreadBadge?.()
+      ctx.logger.info('mail.unblock_address', { rules: rules.length })
+      return rules
+    })
+  )
+
+  /** 一键已读（V2.4）：只改本地库（服务器邮件不动），返回改动条数 */
+  ipcMain.handle(
+    IPC_CHANNELS.MAIL_MARK_ALL_READ,
+    wrap(ctx, markAllReadSchema, async (args: { folder?: string }) => {
+      const changed = await ctx.store.markAllRead(args?.folder ?? 'INBOX')
+      ctx.refreshUnreadBadge?.()
+      ctx.logger.info('mail.mark_all_read', { folder: args?.folder ?? 'INBOX', changed })
+      return changed
+    })
+  )
+
   ipcMain.handle(
     IPC_CHANNELS.MAIL_BULK_LABEL,
     wrap(ctx, bulkLabelSchema, async (args: BulkLabelArgs) => {
@@ -675,31 +744,58 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
     })
   )
 
-  // ---- 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 ----
+  // ---- 待办（V2.4 备忘录式：手动新建 + 引用邮件/自定义时间） ----
   ipcMain.handle(
     IPC_CHANNELS.TASKS_LIST,
     wrap(ctx, null, async () => ctx.store.listTasks())
   )
 
   ipcMain.handle(
+    IPC_CHANNELS.TASKS_GET,
+    wrap(ctx, taskIdSchema, async (args: { id: number }) => ctx.store.getTask(args.id))
+  )
+
+  ipcMain.handle(
     IPC_CHANNELS.TASKS_CREATE,
-    wrap(ctx, taskCreateSchema, async (args: { title: string; dueTs?: number | null; messageId?: number | null }) => {
-      const task = await ctx.store.createTask({
-        title: args.title.trim(),
-        dueTs: args.dueTs ?? null,
-        messageId: args.messageId ?? null
-      })
-      ctx.logger.info('tasks.created', { id: task.id, source: task.source })
-      return task
-    })
+    wrap(
+      ctx,
+      taskCreateSchema,
+      async (args: { title?: string; body?: string; dueTs?: number | null; mailId?: number | null }) => {
+        const task = await ctx.store.createTask({
+          title: args.title,
+          body: args.body,
+          dueTs: args.dueTs ?? null,
+          mailId: args.mailId ?? null
+        })
+        ctx.logger.info('tasks.created', { id: task.id, links: task.links.length })
+        return task
+      }
+    )
   )
 
   ipcMain.handle(
     IPC_CHANNELS.TASKS_UPDATE,
-    wrap(ctx, taskUpdateSchema, async (args: { id: number; title?: string; dueTs?: number | null; done?: boolean }) => {
-      const task = await ctx.store.updateTask(args.id, { title: args.title, dueTs: args.dueTs, done: args.done })
-      return task
-    })
+    wrap(
+      ctx,
+      taskUpdateSchema,
+      async (args: {
+        id: number
+        title?: string
+        body?: string
+        dueTs?: number | null
+        done?: boolean
+        checklist?: Array<{ id?: string; text: string; done?: boolean }>
+      }) => {
+        const checklist = args.checklist ? normalizeChecklist(args.checklist) : undefined
+        return ctx.store.updateTask(args.id, {
+          title: args.title,
+          body: args.body,
+          dueTs: args.dueTs,
+          done: args.done,
+          checklist
+        })
+      }
+    )
   )
 
   ipcMain.handle(
@@ -710,17 +806,39 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
   )
 
   ipcMain.handle(
-    IPC_CHANNELS.TASKS_REBUILD,
-    wrap(ctx, taskRebuildSchema, async (args: { messageIds?: number[] }) => {
-      // 不传 ids → 全量重建（设置页「重建待办」按钮/升级后首次打开用）
-      let ids = args.messageIds
-      if (!ids || ids.length === 0) {
-        const mails = await ctx.store.query({ limit: 5000, offset: 0 })
-        ids = mails.map((m) => m.id)
+    IPC_CHANNELS.TASKS_LINK_ADD,
+    wrap(
+      ctx,
+      taskLinkAddSchema,
+      async (args: { taskId: number; kind: TaskLinkKind; refId: string; label?: string; sub?: string }) => {
+        // 邮件引用以库里真实主题/发件人为准（渲染层传的 label 不采信，避免伪造）
+        if (args.kind === 'mail') {
+          const mailId = Number(args.refId)
+          const mail = Number.isFinite(mailId) ? await ctx.store.getMessage(mailId) : null
+          if (!mail) throw new AppError(ErrorCodes.VALIDATION_FAILED, '要引用的邮件不存在。')
+          const sub = [mail.fromName || mail.fromAddr, mail.dateLabel || ''].filter(Boolean).join(' · ')
+          return ctx.store.addTaskLink(args.taskId, {
+            kind: 'mail',
+            refId: String(mail.id),
+            label: mail.subject,
+            sub
+          })
+        }
+        return ctx.store.addTaskLink(args.taskId, {
+          kind: 'datetime',
+          refId: args.refId,
+          label: args.label ?? null,
+          sub: args.sub ?? null
+        })
       }
-      const res = await rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, ids)
-      return res
-    })
+    )
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASKS_LINK_REMOVE,
+    wrap(ctx, taskLinkRemoveSchema, async (args: { taskId: number; linkId: number }) =>
+      ctx.store.removeTaskLink(args.taskId, args.linkId)
+    )
   )
 
   ipcMain.handle(
@@ -1269,15 +1387,13 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
           ctx.logger.warn('newmail.handle.failed', { reason: e instanceof Error ? e.message : String(e) })
         )
       }
-      // V2.3：同步完成后按新 UID 增量重建待办（卡片 DUE → 任务）
-      if (newUids.length > 0) {
-        const ids = await ctx.store.idsByUids(newUids).catch(() => [] as number[])
-        if (ids.length > 0) {
-          void rebuildTasksForMessages({ store: ctx.store, logger: ctx.logger }, ids).catch(() => undefined)
-        }
-      }
       return result
     })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_LIST_MODELS,
+    wrap(ctx, listAiModelsSchema, async () => ctx.ai.listModels())
   )
 
   ipcMain.handle(
@@ -1370,8 +1486,51 @@ export function registerIpcHandlers(ctx: AppContext, logger: Logger, emitSync: (
 
   ipcMain.handle(
     IPC_CHANNELS.SETTINGS_SET,
-    wrap(ctx, setSettingsSchema, async (args: SetSettingsArgs) => ctx.settings.set(args))
+    wrap(ctx, setSettingsSchema, async (args: SetSettingsArgs) => {
+      // 注意：必须把最新设置返回给渲染层（设置页会用返回值刷新表单；
+      // 漏掉 return 会让渲染层拿到 undefined → 「Cannot read properties of undefined (reading 'aiModel')」）
+      const next = await ctx.settings.set(args)
+      // V2.4：开机自启设置立即生效（不用重启应用）
+      if (args.launchAtLogin !== undefined) ctx.applyLaunchAtLogin?.(args.launchAtLogin)
+      return next
+    })
   )
+
+  // ---- V2.8 自定义标题栏：窗口控制（最小化 / 最大化切换 / 关闭） ----
+  const windowOf = (event: Electron.IpcMainInvokeEvent): Electron.BrowserWindow | null =>
+    BrowserWindow.fromWebContents(event.sender)
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, (event) => {
+    windowOf(event)?.minimize()
+    return { ok: true, data: null }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_TOGGLE_MAXIMIZE, (event) => {
+    const win = windowOf(event)
+    if (!win) return { ok: true, data: false }
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    return { ok: true, data: win.isMaximized() }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_CLOSE, (event) => {
+    windowOf(event)?.close()
+    return { ok: true, data: null }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, (event) => ({
+    ok: true,
+    data: windowOf(event)?.isMaximized() ?? false
+  }))
+
+  // 最大化/还原时把状态推给渲染层，让标题栏按钮图标跟着变
+  for (const win of BrowserWindow.getAllWindows()) {
+    const push = (): void => {
+      if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.WINDOW_STATE, win.isMaximized())
+    }
+    win.on('maximize', push)
+    win.on('unmaximize', push)
+  }
 
   ipcMain.handle(
     IPC_CHANNELS.SHELL_OPEN_EXTERNAL,

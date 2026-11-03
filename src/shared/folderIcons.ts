@@ -65,3 +65,34 @@ export function folderIcon(nameOrPath: string): string {
 export function isCommonFolder(nameOrPath: string): boolean {
   return COMMON_FOLDER_KINDS.includes(folderKind(nameOrPath))
 }
+/** V2.8：统一的线性图标名（渲染层用图标组件；emoji 版保留给主进程/日志等纯文本场景） */
+export type FolderIconName =
+  | 'inbox'
+  | 'draft'
+  | 'sent'
+  | 'trash'
+  | 'junk'
+  | 'archive'
+  | 'conversation'
+  | 'notes'
+  | 'outbox'
+  | 'search'
+  | 'folder'
+
+const ICON_NAMES: Record<FolderKind, FolderIconName> = {
+  inbox: 'inbox',
+  drafts: 'draft',
+  sent: 'sent',
+  deleted: 'trash',
+  junk: 'junk',
+  archive: 'archive',
+  conversation: 'conversation',
+  notes: 'notes',
+  outbox: 'outbox',
+  search: 'search',
+  other: 'folder'
+}
+
+export function folderIconName(nameOrPath: string): FolderIconName {
+  return ICON_NAMES[folderKind(nameOrPath)]
+}

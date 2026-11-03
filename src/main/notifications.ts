@@ -74,3 +74,25 @@ export function shouldNotifyNewMail(reason: string | undefined): boolean {
   if (reason === 'manual' || reason.startsWith('manual')) return false
   return true
 }
+
+/**
+ * 「新邮件过多不弹通知」（V2.4）：
+ * 一次同步突然来一堆（订阅、群公告、批量转发）时，逐封弹通知会刷屏。
+ * 超过阈值就**完全静默系统通知**：界面照常刷新、未读照常计数、角标照常增加，
+ * 只是不打断用户。用户主动点同步时本来就不弹（见 shouldNotifyNewMail）。
+ */
+export const NEW_MAIL_NOTIFY_BURST_THRESHOLD = 5
+
+/** 本次新邮件数量是否多到应该静默（>阈值才静默，=阈值仍逐封弹） */
+export function isNewMailBurst(count: number, threshold: number = NEW_MAIL_NOTIFY_BURST_THRESHOLD): boolean {
+  const n = Math.floor(Number(count) || 0)
+  const t = Math.floor(Number(threshold) || 0)
+  if (t <= 0) return false // 0 = 关闭该策略
+  return n > t
+}
+
+/** 汇总文案（日志/可选的应用内提示用） */
+export function describeNewMailBurst(count: number): string {
+  return `一次到达 ${count} 封新邮件，已跳过系统通知`
+}
+

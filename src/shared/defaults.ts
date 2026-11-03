@@ -163,6 +163,10 @@ export const DEFAULT_SHOW_REMOTE_IMAGES = true
 /** 免打扰默认：关闭；默认窗口 23:00–08:00（跨午夜） */
 /** 启动后是否自动检查更新（默认开；只检查不自动下载） */
 export const DEFAULT_AUTO_CHECK_UPDATE = true
+/** 榛樿瑙嗚椋庢牸锛堜笌 shared/uiStyles 鐨勯粯璁ゅ€间繚鎸佷竴鑷达級 */
+export const DEFAULT_UI_STYLE = 'apple'
+/** 开机自动启动（默认关；开启时隐藏启动驻留托盘） */
+export const DEFAULT_LAUNCH_AT_LOGIN = false
 export const DEFAULT_DND_ENABLED = false
 export const DEFAULT_DND_START = '23:00'
 export const DEFAULT_DND_END = '08:00'

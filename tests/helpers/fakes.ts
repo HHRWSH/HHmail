@@ -4,7 +4,8 @@
  * 上层逻辑（sync/thread/AI 业务）只依赖接口，用这些 fake 验证"换实现不破坏行为"。
  */
 import type { CalendarSourceMail } from '../../src/shared/calendar'
-import type { TaskCandidate, TaskItem } from '../../src/shared/tasks'
+import type { TaskChecklistItem, TaskItem, TaskLink, TaskLinkKind } from '../../src/shared/tasks'
+import { isBlockedByRules, type BlockKind, type BlockSender } from '../../src/shared/blocklist'
 import type {
   AttachmentPayload,
   MailboxInfo,
@@ -185,6 +186,7 @@ export class InMemoryMessageStore implements MessageStore {
         const r = this.snoozeRecords.get(id)
         return r && r.notifiedAt === null ? r.until : null
       })(),
+      blocked: this.blockedByMail.get(id) === true,
     }
   }
 
@@ -714,7 +716,62 @@ ${m.fromAddr}`.toLowerCase()
     return out.sort((a, b) => (a.dueTs ?? 0) - (b.dueTs ?? 0))
   }
 
+  async listBlockSenders(): Promise<BlockSender[]> {
+    return [...this.blockSenders]
+  }
+
+  async addBlockSender(input: { kind: BlockKind; value: string }): Promise<BlockSender[]> {
+    const value = String(input.value ?? '').trim().toLowerCase()
+    if (value && !this.blockSenders.some((r) => r.kind === input.kind && r.value === value)) {
+      this.blockSenders.push({ id: this.nextBlockId++, kind: input.kind, value, createdAt: Date.now() })
+    }
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  async removeBlockSender(id: number): Promise<BlockSender[]> {
+    this.blockSenders = this.blockSenders.filter((r) => r.id !== id)
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  async removeBlockRulesForAddress(address: string): Promise<BlockSender[]> {
+    const addr = address.trim().toLowerCase()
+    const domain = addr.includes('@') ? addr.slice(addr.indexOf('@') + 1) : addr
+    this.blockSenders = this.blockSenders.filter(
+      (r) => !((r.kind === 'email' && r.value === addr) || (r.kind === 'domain' && r.value === domain))
+    )
+    await this.applyBlockRules()
+    return this.listBlockSenders()
+  }
+
+  async applyBlockRules(): Promise<number> {
+    let changed = 0
+    for (const [id, m] of this.messages) {
+      const next = isBlockedByRules(m.fromAddr, this.blockSenders) ? 1 : 0
+      const cur = this.blockedByMail.get(id) === true ? 1 : 0
+      if (next !== cur) {
+        this.blockedByMail.set(id, next === 1)
+        changed += 1
+      }
+    }
+    return changed
+  }
+  async markAllRead(): Promise<number> {
+    let n = 0
+    for (const [id, m] of this.messages) {
+      if (!m.flags.includes('\\Seen')) {
+        this.messages.set(id, { ...m, flags: [...m.flags, '\\Seen'] })
+        n += 1
+      }
+    }
+    return n
+  }
+
   private unsubStates = new Map<number, 'done' | 'failed'>()
+  private blockSenders: BlockSender[] = []
+  private blockedByMail = new Map<number, boolean>()
+  private nextBlockId = 1
 
   async setUnsubscribeState(messageId: number, status: 'done' | 'failed'): Promise<void> {
     this.unsubStates.set(messageId, status)
@@ -732,75 +789,96 @@ ${m.fromAddr}`.toLowerCase()
     this.mailTags.delete(`manual:${messageId}`)
   }
 
-  // ---- 待办（V2.3）：内存版，供 sync/snooze 等测试满足 MessageStore 契约 ----
+  // ---- 待办（V2.4 备忘录式）：内存版，满足 MessageStore 契约 ----
   private tasks: TaskItem[] = []
+  private taskLinks: TaskLink[] = []
   private nextTaskId = 1
+  private nextTaskLinkId = 1
 
   async listTasks(): Promise<TaskItem[]> {
-    return [...this.tasks]
+    return this.tasks.map((t) => ({ ...t, checklist: t.checklist.map((c) => ({ ...c })), links: t.links.map((l) => ({ ...l })) }))
   }
 
-  async tasksForMessages(ids: number[]): Promise<TaskItem[]> {
-    return this.tasks.filter((t) => t.messageId !== null && ids.includes(t.messageId))
+  async getTask(id: number): Promise<TaskItem | null> {
+    const t = this.tasks.find((x) => x.id === id)
+    return t ? { ...t, links: t.links.map((l) => ({ ...l })) } : null
   }
 
-  async replaceAutoTasks(messageIds: number[], tasks: TaskCandidate[]): Promise<void> {
-    this.tasks = this.tasks.filter((t) => t.source === 'manual' || t.messageId === null || !messageIds.includes(t.messageId))
+  async createTask(input: {
+    title?: string
+    body?: string
+    dueTs?: number | null
+    mailId?: number | null
+  }): Promise<TaskItem> {
     const now = Date.now()
-    for (const t of tasks) {
-      this.tasks.push({
-        id: this.nextTaskId++,
-        messageId: t.messageId,
-        title: t.title,
-        dueTs: t.dueTs,
-        source: t.source,
-        done: t.done,
-        createdAt: now,
-        updatedAt: now
-      })
-    }
-  }
-
-  async createTask(input: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem> {
-    const now = Date.now()
-    const task: TaskItem = {
+    const t: TaskItem = {
       id: this.nextTaskId++,
-      messageId: input.messageId ?? null,
-      title: input.title,
+      title: String(input.title ?? '').trim() || '未命名待办',
+      body: String(input.body ?? ''),
       dueTs: input.dueTs ?? null,
-      source: 'manual',
       done: false,
+      checklist: [],
+      links: [],
       createdAt: now,
       updatedAt: now
     }
-    this.tasks.push(task)
-    return task
+    this.tasks.push(t)
+    if (input.mailId) {
+      await this.addTaskLink(t.id, { kind: 'mail', refId: String(input.mailId), label: `邮件 ${input.mailId}` })
+    }
+    return (await this.getTask(t.id)) as TaskItem
   }
 
-  async updateTask(id: number, patch: { title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem> {
+  async updateTask(
+    id: number,
+    patch: { title?: string; body?: string; dueTs?: number | null; done?: boolean; checklist?: TaskChecklistItem[] }
+  ): Promise<TaskItem> {
     const t = this.tasks.find((x) => x.id === id)
     if (!t) throw new Error(`task ${id} not found`)
-    if (patch.title !== undefined) t.title = patch.title
+    if (patch.title !== undefined) t.title = String(patch.title).trim() || '未命名待办'
+    if (patch.body !== undefined) t.body = String(patch.body)
     if (patch.dueTs !== undefined) t.dueTs = patch.dueTs
     if (patch.done !== undefined) t.done = patch.done
+    if (patch.checklist !== undefined) t.checklist = patch.checklist.map((c) => ({ ...c }))
     t.updatedAt = Date.now()
-    return t
+    return (await this.getTask(id)) as TaskItem
   }
 
   async deleteTask(id: number): Promise<void> {
+    this.taskLinks = this.taskLinks.filter((l) => l.taskId !== id)
     this.tasks = this.tasks.filter((t) => t.id !== id)
   }
 
-  async getIndexDocsFor(
-    ids: number[]
-  ): Promise<Array<{ messageId: number; card: string; dueTs: number | null; subject: string }>> {
-    return ids
-      .map((id) => {
-        const m = this.messages.get(id)
-        const due = (m as unknown as { dueTs?: number | null } | undefined)?.dueTs ?? null
-        return { messageId: id, card: '', dueTs: due, subject: m?.subject ?? '' }
+  async addTaskLink(
+    taskId: number,
+    link: { kind: TaskLinkKind; refId: string; label?: string | null; sub?: string | null }
+  ): Promise<TaskItem> {
+    const t = this.tasks.find((x) => x.id === taskId)
+    if (!t) throw new Error(`task ${taskId} not found`)
+    const existing = t.links.find((l) => l.kind === link.kind && l.refId === String(link.refId))
+    if (existing) {
+      existing.label = link.label ?? null
+      existing.sub = link.sub ?? null
+    } else {
+      t.links.push({
+        id: this.nextTaskLinkId++,
+        taskId,
+        kind: link.kind,
+        refId: String(link.refId),
+        label: link.label ?? null,
+        sub: link.sub ?? null
       })
-      .filter((x) => x.dueTs !== null)
+    }
+    t.updatedAt = Date.now()
+    return (await this.getTask(taskId)) as TaskItem
+  }
+
+  async removeTaskLink(taskId: number, linkId: number): Promise<TaskItem> {
+    const t = this.tasks.find((x) => x.id === taskId)
+    if (!t) throw new Error(`task ${taskId} not found`)
+    t.links = t.links.filter((l) => l.id !== linkId)
+    t.updatedAt = Date.now()
+    return (await this.getTask(taskId)) as TaskItem
   }
 
   async listTagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>> {

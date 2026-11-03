@@ -81,16 +81,18 @@ export function defaultModelForProvider(id: string | null | undefined): string {
 }
 
 /**
- * 校验「服务商 + 模型」组合。
- * 预设服务商要求模型在列表内（避免用户填错导致 400）；自定义服务商只要求非空。
+ * 校验「服务商 + 模型」组合（V2.4 放宽）。
+ *
+ * 以前预设服务商只允许内置列表里的模型，但服务商经常上线新模型（如 deepseek-v3.2），
+ * 用户根本没法用。现在只校验**模型 ID 的字符安全**，内置列表退化为「推荐值」；
+ * 弃用模型名（deepseek-chat / deepseek-reasoner）仍在 config.validateAiModel 里单独拒绝。
  */
 export function validateAiConfig(providerId: string, model: string): { ok: boolean; reason?: string } {
-  const provider = resolveAiProvider(providerId)
+  resolveAiProvider(providerId) // 保留参数校验（未知服务商回退默认）
   const m = String(model ?? '').trim()
   if (!m) return { ok: false, reason: '请填写模型名。' }
-  if (provider.id === 'custom' || provider.models.length === 0) return { ok: true }
-  if (!provider.models.includes(m)) {
-    return { ok: false, reason: `「${provider.label}」不支持模型 ${m}，可用：${provider.models.join(' / ')}` }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$/.test(m)) {
+    return { ok: false, reason: '模型名不合法：只允许字母、数字和 . _ : / -' }
   }
   return { ok: true }
 }

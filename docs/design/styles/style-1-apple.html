@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Apple 原生风（大面积留白 + 系统蓝）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-size: 13px; -webkit-font-smoothing: antialiased; overflow: hidden; }
+  button { font: inherit; border: 0; background: none; cursor: pointer; color: inherit; }
+  .app { display: grid; grid-template-columns: 224px 336px 1fr; height: 100vh; }
+  /* sidebar */
+  .brand { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+  .logo { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 13px; background: linear-gradient(135deg, #2f6fed, #22c1a4); }
+  .brand-name { font-weight: 700; font-size: 13.5px; }
+  .brand-sub { font-size: 10.5px; opacity: 0.55; }
+  .account { display: flex; align-items: center; gap: 7px; font-size: 11px; padding: 6px 8px; margin-bottom: 14px; }
+  .account .dot { width: 6px; height: 6px; border-radius: 50%; background: #2f9e6e; }
+  .nav-label { font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; opacity: 0.45; padding: 10px 8px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; font-size: 12.5px; border-radius: 8px; }
+  .nav-item .ico { width: 16px; text-align: center; }
+  .nav-item .count { margin-left: auto; font-size: 10.5px; opacity: 0.55; }
+  .nav-item.active { font-weight: 600; }
+  /* list */
+  .list-head { padding: 14px 14px 8px; }
+  .list-title { font-size: 15px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+  .list-title .sub { font-size: 10.5px; opacity: 0.55; font-weight: 400; }
+  .search { margin-top: 10px; display: flex; align-items: center; gap: 7px; padding: 8px 11px; font-size: 12px; opacity: 0.7; }
+  .rows { padding: 2px 8px 12px; overflow: hidden; }
+  .row { display: flex; gap: 10px; padding: 10px 10px; border-radius: 10px; margin-bottom: 2px; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 11.5px; font-weight: 700; flex: none; }
+  .row-main { min-width: 0; flex: 1; }
+  .row-top { display: flex; align-items: baseline; gap: 6px; }
+  .row-from { font-size: 12px; font-weight: 700; }
+  .row-time { margin-left: auto; font-size: 10px; opacity: 0.5; flex: none; }
+  .row-subject { font-size: 12.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-snippet { font-size: 11.5px; opacity: 0.6; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-meta { display: flex; gap: 6px; margin-top: 5px; }
+  .mini { font-size: 10px; padding: 1px 6px; border-radius: 999px; }
+  .row.unread .row-subject { font-weight: 700; }
+  /* detail */
+  .detail { overflow: hidden; display: flex; flex-direction: column; }
+  .detail-head { padding: 18px 24px 14px; }
+  .detail-title { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
+  .detail-meta { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .detail-meta .who { font-size: 12.5px; font-weight: 700; }
+  .detail-meta .mail { font-size: 11px; opacity: 0.55; }
+  .detail-meta .time { margin-left: auto; font-size: 11px; opacity: 0.5; }
+  .toolbar { display: flex; gap: 7px; padding: 0 24px 14px; flex-wrap: wrap; }
+  .tool { font-size: 11.5px; padding: 6px 11px; border-radius: 999px; display: inline-flex; gap: 5px; align-items: center; }
+  .body { padding: 6px 26px 24px; font-size: 13.5px; line-height: 1.85; overflow: auto; }
+  .body p { margin-bottom: 10px; }
+  .attach { display: flex; gap: 8px; margin-top: 16px; }
+  .file { font-size: 11.5px; padding: 8px 11px; border-radius: 9px; display: inline-flex; gap: 6px; align-items: center; }
+  
+  body.s-apple { background: #f5f5f7; color: #1d1d1f; font-family: -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .s-apple .app { gap: 12px; padding: 12px; }
+  .s-apple .sidebar, .s-apple .list-pane, .s-apple .detail { background: #fff; border-radius: 18px; border: 1px solid #e5e5ea; }
+  .s-apple .sidebar { padding: 16px 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .s-apple .list-pane { display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .s-apple .detail { box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .s-apple .logo { background: linear-gradient(135deg, #0a84ff, #64d2ff); border-radius: 9px; }
+  .s-apple .nav-item { border-radius: 9px; }
+  .s-apple .nav-item.active { background: rgba(0, 113, 227, 0.1); color: #0071e3; }
+  .s-apple .search { background: #f5f5f7; border-radius: 10px; }
+  .s-apple .row { border-radius: 12px; }
+  .s-apple .row.selected { background: rgba(0, 113, 227, 0.08); }
+  .s-apple .row:hover { background: #f5f5f7; }
+  .s-apple .row-time, .s-apple .row-snippet { color: #86868b; }
+  .s-apple .mini { background: #f5f5f7; color: #6e6e73; }
+  .s-apple .detail-title { font-size: 22px; letter-spacing: 0.1px; }
+  .s-apple .tool { background: #f5f5f7; color: #1d1d1f; }
+  .s-apple .file { background: #f5f5f7; border: 1px solid #e5e5ea; }
+  .s-apple .body { color: #1d1d1f; }
+  .s-apple .accent-link { color: #0071e3; }
+  
+</style></head>
+<body class="s-apple">
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">H</div><div><div class="brand-name">HHmail</div><div class="brand-sub">收信只读 · 支持发信 · AI 摘要</div></div></div>
+    <div class="account"><span class="dot"></span>1155276985@link.cuhk.edu.hk</div>
+    <div class="nav-label">邮箱</div>
+    <div class="nav-item active"><span class="ico">📥</span>收件箱<span class="count">12</span></div>
+    <div class="nav-item"><span class="ico">✨</span>AI 助手</div>
+    <div class="nav-item"><span class="ico">✏️</span>草稿箱</div>
+    <div class="nav-item"><span class="ico">📚</span>知识库</div>
+    <div class="nav-item"><span class="ico">🗓</span>日历</div>
+    <div class="nav-item"><span class="ico">☑️</span>待办</div>
+    <div class="nav-item"><span class="ico">↗</span>已发送</div>
+    <div class="nav-label">类别</div>
+    <div class="nav-item"><span class="ico">⭐</span>星标</div>
+    <div class="nav-item"><span class="ico">🚩</span>红旗</div>
+    <div class="nav-label">标签</div><div class="nav-item"><span class="ico">🔵</span>Blue<span class="count">0</span></div><div class="nav-item"><span class="ico">🟢</span>Green<span class="count">0</span></div>
+  </aside>
+
+  <section class="list-pane">
+    <div class="list-head">
+      <div class="list-title">收件箱 <span class="sub">12 封未读</span></div>
+      <div class="search"><span>🔍</span><span>搜索邮件…（主题 / 正文 / 发件人）</span></div>
+    </div>
+    <div class="rows">
+      
+      <div class="row selected unread">
+        <div class="avatar" style="background:#3b82f6">林</div>
+        <div class="row-main">
+          <div class="row-top"><span class="row-from">Prof. 林教授</span><span class="row-time">刚刚</span></div>
+          <div class="row-subject">关于毕业论文进度的沟通</div>
+          <div class="row-snippet">附件里是我整理的时间表，下周三前把初稿发我看看……</div>
+          <div class="row-meta"><span class="mini">📎 附件</span><span class="mini">Prof.</span></div>
+        </div>
+      </div>
+      <div class="row  unread">
+        <div class="avatar" style="background:#0ea5e9">教</div>
+        <div class="row-main">
+          <div class="row-top"><span class="row-from">教务处</span><span class="row-time">1 小时前</span></div>
+          <div class="row-subject">【重要】关于选课与学费缴费的通知</div>
+          <div class="row-snippet">本学期第二阶段选课将于 11 月 7 日 18:00 截止，请及时确认……</div>
+          <div class="row-meta"><span class="mini">教务处</span></div>
+        </div>
+      </div>
+      <div class="row  unread">
+        <div class="avatar" style="background:#8b5cf6">图</div>
+        <div class="row-main">
+          <div class="row-top"><span class="row-from">图书馆</span><span class="row-time">2 小时前</span></div>
+          <div class="row-subject">CSE 系周会纪要 & 下周活动安排</div>
+          <div class="row-snippet">本周五 15:30 在 SHB 123 举行系周会，会后有茶歇……</div>
+          <div class="row-meta"><span class="mini">图书馆</span></div>
+        </div>
+      </div>
+      <div class="row  ">
+        <div class="avatar" style="background:#ef4444">IT</div>
+        <div class="row-main">
+          <div class="row-top"><span class="row-from">IT 服务台</span><span class="row-time">3 小时前</span></div>
+          <div class="row-subject">您借阅的资源即将到期，请及时归还</div>
+          <div class="row-snippet">您借阅的《Computer Networks》将于 11 月 6 日到期……</div>
+          <div class="row-meta"><span class="mini">IT</span></div>
+        </div>
+      </div>
+      <div class="row  ">
+        <div class="avatar" style="background:#f59e0b">王</div>
+        <div class="row-main">
+          <div class="row-top"><span class="row-from">王同学</span><span class="row-time">4 小时前</span></div>
+          <div class="row-subject">组队需要：CSCI 540 期末 project</div>
+          <div class="row-snippet">看到你也在选这门课，方便的话我们组个队？我这边已经有两个人……</div>
+          <div class="row-meta"><span class="mini">📎 附件</span><span class="mini">王同学</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="detail">
+    <div class="detail-head">
+      <div class="detail-title">关于毕业论文进度的沟通</div>
+      <div class="detail-meta">
+        <div class="avatar" style="background:#3b82f6">林</div>
+        <div><div class="who">Prof. 林教授</div><div class="mail">lin@link.cuhk.edu.hk</div></div>
+        <div class="time">2026 年 11 月 3 日（周一）10:53</div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span class="tool">⭐ 星标</span><span class="tool">🏷 类别</span><span class="tool">🚩 红旗</span>
+      <span class="tool">🔖 标签</span><span class="tool">⏰ 稍后提醒</span><span class="tool">✨ AI 总结</span>
+      <span class="tool">↩ 回复</span><span class="tool">↪ 转发</span><span class="tool">☑ 加入待办</span>
+    </div>
+    <div class="body">
+      <p>这是第 1 封测试邮件的内容摘要，用于验证列表渲染与搜索。</p>
+      <p>长正文第 1 行：用于验证详情区滚动。长正文第 2 行：用于验证详情区滚动。长正文第 3 行：用于验证详情区滚动。</p>
+      <p>长正文第 4 行：用于验证详情区滚动。长正文第 5 行：用于验证详情区滚动。</p>
+      
+      <div class="attach"><span class="file">📎 论文时间表.xlsx</span><span class="file">📎 初稿模板.docx</span></div>
+      <p style="margin-top:18px;font-size:12px;opacity:0.55">— 收信只读，不会把服务器邮件标记为已读 —</p>
+    </div>
+  </section>
+</div>
+</body></html>

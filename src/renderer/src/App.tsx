@@ -3,15 +3,17 @@
  * - 侧边栏分组（邮箱/文件夹/标签/视图）可折叠，折叠状态本地持久化；中部可滚动，底部固定；
  * - 页面常驻挂载（display 切换）：切换页面不再重新同步/重建状态，即时切换。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppSettings, AuthStatus, MailFolder, MailLabel, SavedView } from '@shared/types'
 import { resolveTheme, densityTokens } from '@shared/theme'
-import { folderIcon, isCommonFolder } from '@shared/folderIcons'
+import { folderIconName, isCommonFolder } from '@shared/folderIcons'
 import { api } from './bridge'
 import { FALLBACK_SETTINGS, SettingsContext } from './settings-context'
 import { FEATURE_REGISTRY, DEFAULT_FEATURE, type PageProps } from './registry'
 import { LoginPage } from './pages/Login'
 import { Toast, type ToastState } from './components/Toast'
+import { TitleBar } from './components/TitleBar'
+import { Icon, featureIconName } from './components/Icon'
 
 const COLLAPSE_STORAGE_KEY = 'mail-ai-sidebar-collapsed'
 
@@ -109,6 +111,8 @@ export function App() {
     const root = document.documentElement
     root.dataset.theme = theme
     root.dataset.density = settings.density
+    // V2.6：视觉风格预设（纯 CSS 变量切换，布局不变）
+    root.dataset.style = settings.uiStyle || 'apple'
     const tokens = densityTokens(settings.density)
     root.style.setProperty('--row-h', tokens.rowH)
     root.style.setProperty('--app-font-size', tokens.font)
@@ -118,7 +122,7 @@ export function App() {
     } catch {
       /* ignore */
     }
-  }, [settings.theme, settings.density, systemDark])
+  }, [settings.theme, settings.density, settings.uiStyle, systemDark])
 
   // 窗口标题跟随品牌名
   useEffect(() => {
@@ -289,6 +293,50 @@ export function App() {
   // 知识库「✨ 问 AI」：跳到 AI 助手页并带上问题（消费后清空）
   const [aiQuestion, setAiQuestion] = useState<string | null>(null)
 
+  // ---- V2.8 自绘标题栏：全局搜索 + 收件箱命令（全部已读/同步）+ 状态回显 ----
+  const [searchQuery, setSearchQuery] = useState('')
+  const inboxCommandsRef = useRef<{ markAllRead: () => void; sync: () => void; closeDetail: () => void } | null>(
+    null
+  )
+  const [inboxStatus, setInboxStatus] = useState<{
+    syncing: boolean
+    marking: boolean
+    label: string
+    detailOpen: boolean
+  }>({
+    syncing: false,
+    marking: false,
+    label: '',
+    detailOpen: false
+  })
+  const handleInboxCommands = useCallback(
+    (cmds: { markAllRead: () => void; sync: () => void; closeDetail: () => void } | null) => {
+      inboxCommandsRef.current = cmds
+    },
+    []
+  )
+  const handleInboxStatus = useCallback(
+    (s: { syncing: boolean; marking: boolean; label: string; detailOpen: boolean } | null) => {
+      setInboxStatus(s ?? { syncing: false, marking: false, label: '', detailOpen: false })
+    },
+    []
+  )
+  const handleTitleSearch = useCallback((value: string) => {
+    setSearchQuery(value)
+    // 在其它页面输入搜索词时自动切回收件箱（搜索是收件箱能力）
+    setActive((prev) => (prev === 'inbox' ? prev : 'inbox'))
+  }, [])
+  const canGoBack = active !== 'inbox' || openMailId !== null || inboxStatus.detailOpen
+  const handleBack = useCallback(() => {
+    if (active === 'inbox' && (openMailId !== null || inboxStatus.detailOpen)) {
+      setOpenMailId(null)
+      // 收件箱详情是页面内部状态，通知它关闭
+      inboxCommandsRef.current?.closeDetail()
+      return
+    }
+    setActive('inbox')
+  }, [active, openMailId, inboxStatus.detailOpen])
+
   const pageProps: PageProps = useMemo(
     () => ({
       // 页面只在登录后渲染，此处 auth 必非 null
@@ -313,7 +361,11 @@ export function App() {
       onSettingsChanged: setSettings,
       autoTagFilter: active === 'inbox' ? activeAutoTag : null,
       categoryId: active === 'inbox' ? activeCategoryId : null,
-      unreadOnly: active === 'inbox' ? activeUnreadOnly : false
+      unreadOnly: active === 'inbox' ? activeUnreadOnly : false,
+      // V2.8 标题栏：全局搜索词 + 收件箱命令/状态注册
+      globalSearch: searchQuery,
+      onInboxCommands: handleInboxCommands,
+      onInboxStatus: handleInboxStatus
     }),
     [
       auth,
@@ -329,6 +381,9 @@ export function App() {
       showToast,
       handleOpenMail,
       reloadLabels,
+      searchQuery,
+      handleInboxCommands,
+      handleInboxStatus,
       settings
     ]
   )
@@ -392,6 +447,25 @@ export function App() {
   return (
     <SettingsContext.Provider value={settings}>
     <div className="app">
+      {/* V2.8：自绘标题栏（Windows 无边框）—— 返回/搜索/全部已读/同步/设置/窗口按钮 */}
+      <TitleBar
+        brandName={settings.brandName || 'mail'}
+        brandInitial={(settings.brandName || 'M').trim().slice(0, 1).toUpperCase()}
+        search={searchQuery}
+        onSearchChange={handleTitleSearch}
+        onSearchSubmit={() => setActive('inbox')}
+        canGoBack={canGoBack}
+        onBack={handleBack}
+        inboxActive={active === 'inbox'}
+        onMarkAllRead={() => inboxCommandsRef.current?.markAllRead()}
+        markingAllRead={inboxStatus.marking}
+        onSync={() => inboxCommandsRef.current?.sync()}
+        syncing={inboxStatus.syncing}
+        syncLabel={inboxStatus.label}
+        onOpenSettings={() => setActive('settings')}
+        settingsActive={active === 'settings'}
+      />
+      <div className="app-body">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo">{(settings.brandName || 'M').trim().slice(0, 1).toUpperCase()}</div>
@@ -420,7 +494,7 @@ export function App() {
                     onClick={() => setActive(f.id)}
                     data-nav={f.id}
                   >
-                    <span className="ico">{f.icon}</span> {f.label}
+                    <span className="ico"><Icon name={featureIconName(f.id)} /></span> {f.label}
                   </div>
                 ))}
                 {future.map((f) => (
@@ -430,7 +504,7 @@ export function App() {
                     data-nav={f.id}
                     onClick={() => showToast(`「${f.label}」为 P1 预留功能，当前版本未实现`)}
                   >
-                    <span className="ico">{f.icon}</span> {f.label}
+                    <span className="ico"><Icon name={featureIconName(f.id)} /></span> {f.label}
                     <span className="soon">{f.hint}</span>
                   </div>
                 ))}
@@ -453,7 +527,7 @@ export function App() {
                     data-nav={`folder:${f.path}`}
                     title={f.path}
                   >
-                    <span className="ico">{folderIcon(f.name || f.path)}</span> {f.name}
+                    <span className="ico"><Icon name={folderIconName(f.name || f.path)} /></span> {f.name}
                   </div>
                   {/* V2.2：未读作为文件夹列表里的子项（原来的工具栏「全部/未读」已移除） */}
                   {f.path === 'INBOX' && (
@@ -465,7 +539,7 @@ export function App() {
                       }}
                       data-nav="unread"
                     >
-                      <span className="ico">●</span> 未读
+                      <span className="ico"><Icon name="dot" /></span> 未读
                       {unreadTotal > 0 && <span className="cnt">{unreadTotal}</span>}
                     </div>
                   )}
@@ -477,7 +551,7 @@ export function App() {
                     onClick={() => setShowAllFolders((v) => !v)}
                     data-nav="folders-more"
                   >
-                    <span className="ico">{showAllFolders ? '▴' : '▾'}</span>
+                    <span className="ico"><Icon name={showAllFolders ? 'chevron-up' : 'chevron-down'} /></span>
                     {showAllFolders
                       ? '收起不常用文件夹'
                       : `更多文件夹（${folders.length - folders.filter((f) => isCommonFolder(f.name || f.path)).length}）`}
@@ -494,7 +568,7 @@ export function App() {
                   onClick={() => applyInboxFilter({ starred: !activeStarred })}
                   data-nav="starred"
                 >
-                  <span className="ico">⭐</span> 星标
+                  <span className="ico"><Icon name="star" /></span> 星标
                 </div>
                 {/* V2.2：红旗（像 Outlook 的后续标记）—— 与星标独立，列表里显示红色小旗 */}
                 <div
@@ -502,7 +576,7 @@ export function App() {
                   onClick={() => applyInboxFilter({ flagged: !activeFlagged })}
                   data-nav="flagged"
                 >
-                  <span className="ico">🚩</span> 红旗
+                  <span className="ico"><Icon name="flag" /></span> 红旗
                 </div>
                 {/* V2.2：老的「彩色标签」体系已并入统一标签（自动 + 手动），这里只列统一标签 */}
                 <div className="nav-item" style={{ display: 'none' }} aria-hidden="true" data-legacy-labels={labels.length} />
@@ -536,7 +610,7 @@ export function App() {
               onClick={() => setActive(f.id)}
               data-nav={f.id}
             >
-              <span className="ico">{f.icon}</span> {f.label}
+              <span className="ico"><Icon name={featureIconName(f.id)} /></span> {f.label}
             </button>
           ))}
           <button
@@ -546,7 +620,7 @@ export function App() {
               void api.logout().then(() => setAuth({ loggedIn: false, email: null }))
             }}
           >
-            <span className="ico">↪</span> 退出登录
+            <span className="ico"><Icon name="logout" /></span> 退出登录
           </button>
         </div>
       </aside>
@@ -562,6 +636,7 @@ export function App() {
           )
         })}
       </main>
+      </div>
 
       {toast && <Toast toast={toast} onDone={() => setToast(null)} />}
     </div>

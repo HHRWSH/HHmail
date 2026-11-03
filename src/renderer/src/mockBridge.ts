@@ -158,7 +158,8 @@ function buildMails(): MailListItem[] {
       hasAttachments: i % 4 === 0,
       labels: [],
       starred: i % 7 === 0,
-      snoozeUntil: null
+      snoozeUntil: null,
+      blocked: false
     }
   })
 }
@@ -196,6 +197,21 @@ export function createMockBridge(): WindowApi {
   const mockTagExamples = new Map<number, string[]>()
   const mockManualTags = new Map<number, string[]>()
   const mockFlagged = new Set<number>()
+  // V2.7 拦截：mock 里记录命中拦截的邮件 id，默认列表会排除它们
+  const mockBlocked = new Set<number>()
+    const mockBlockRules: Array<{ id: number; kind: 'email' | 'domain'; value: string; createdAt: number }> = []
+
+  /** V2.7锛氭寜褰撳墠鎷︽埅瑙勫垯閲嶇畻 mock 鍛戒腑闆嗗悎锛堥棴鍖呭唴鍑芥暟锛屼緵 mock 鏂规硶璋冪敤锛?*/
+  const recomputeMockBlocked = (): void => {
+    mockBlocked.clear()
+    for (const m of mails) {
+      const addr = String(m.fromAddr ?? '').toLowerCase()
+      for (const r of mockBlockRules) {
+        const hit = r.kind === 'email' ? addr === r.value : addr.endsWith('@' + r.value) || addr.endsWith('.' + r.value)
+        if (hit) mockBlocked.add(m.id)
+      }
+    }
+  }
   // V2.3：待办（内存，E2E 用；首次 listTasks 时按邮件播种几条）
   const mockTasks: import('@shared/tasks').TaskItem[] = []
   // V2.3 自动更新：内存状态（E2E 用）
@@ -257,6 +273,8 @@ export function createMockBridge(): WindowApi {
 
     showRemoteImages: true,
     autoCheckUpdate: true,
+    uiStyle: 'apple',
+    launchAtLogin: false,
     dndEnabled: false,
     dndStart: '23:00',
     dndEnd: '08:00',
@@ -311,6 +329,7 @@ export function createMockBridge(): WindowApi {
   }
 
   return {
+    platform: 'win32',
     async getAuthStatus(): Promise<AuthStatus> {
       return { loggedIn, email: loggedIn ? 'demo@link.example.edu' : null }
     },
@@ -355,6 +374,8 @@ export function createMockBridge(): WindowApi {
       const flaggedOnly = args?.flaggedOnly === true
       const categoryId = args?.categoryId
       let filtered = decorated.filter((m) => {
+        // V2.7：默认排除被拦截的发件人；blockedOnly 时只看被拦截的
+        if (args?.blockedOnly ? !mockBlocked.has(m.id) : mockBlocked.has(m.id)) return false
         if (categoryId !== undefined && mockMailCategory.get(m.id) !== categoryId) return false
         if (flaggedOnly && !mockFlagged.has(m.id)) return false
         if (autoTags.length > 0 && !autoTags.some((t) => (mockTagsByMail.get(m.id) ?? []).includes(t))) return false
@@ -390,6 +411,7 @@ export function createMockBridge(): WindowApi {
         manualTags: mockManualTags.get(base.id) ?? [],
         starred: starred.has(base.id),
         snoozeUntil: snoozes.get(base.id) ?? null,
+        blocked: mockBlocked.has(base.id),
         toAddrs: ['student@link.example.edu'],
         ccAddrs: [],
         bodyText: `${base.snippet}\n\n${longText}`,
@@ -474,6 +496,65 @@ export function createMockBridge(): WindowApi {
     },
     async deleteDraft(id) {
       drafts = drafts.filter((d) => d.id !== id)
+    },
+    // V2.4 一键已读（mock）：把内存里所有邮件标成已读，返回改动条数
+    // V2.7 拦截发件人（mock）：本地规则 + 命中标记，主列表默认排除
+    // V2.8 custom title bar (mock): no real window ops in browser, return stable values
+    async windowMinimize() {
+      return
+    },
+    async windowToggleMaximize() {
+      return false
+    },
+    async windowClose() {
+      return
+    },
+    async windowIsMaximized() {
+      return false
+    },
+    onWindowState() {
+      return () => true
+    },
+    async blockSenders() {
+      return mockBlockRules.map((r) => ({ ...r }))
+    },
+    async blockSender(args: { address: string; kind?: 'email' | 'domain' }) {
+      const address = String(args.address ?? '').trim().toLowerCase()
+      const kind: 'email' | 'domain' =
+        args.kind ?? (address.startsWith('@') || !address.includes('@') ? 'domain' : 'email')
+      const value = kind === 'email' ? address : address.replace(/^[@*.]*/, '')
+      if (value && !mockBlockRules.some((r) => r.kind === kind && r.value === value)) {
+        mockBlockRules.unshift({ id: Date.now() % 1_000_000, kind, value, createdAt: Date.now() })
+      }
+      recomputeMockBlocked()
+      return mockBlockRules.map((r) => ({ ...r }))
+    },
+    async unblockSender(id: number) {
+      const i = mockBlockRules.findIndex((r) => r.id === id)
+      if (i >= 0) mockBlockRules.splice(i, 1)
+      recomputeMockBlocked()
+      return mockBlockRules.map((r) => ({ ...r }))
+    },
+    async unblockAddress(address: string) {
+      const addr = String(address ?? '').trim().toLowerCase()
+      const domain = addr.includes('@') ? addr.slice(addr.indexOf('@') + 1) : addr
+      for (let i = mockBlockRules.length - 1; i >= 0; i -= 1) {
+        const r = mockBlockRules[i]
+        if ((r.kind === 'email' && r.value === addr) || (r.kind === 'domain' && r.value === domain)) mockBlockRules.splice(i, 1)
+      }
+      recomputeMockBlocked()
+      return mockBlockRules.map((r) => ({ ...r }))
+    },
+
+    async markAllRead() {
+      let n = 0
+      for (const m of mails) {
+        if (m.unread) {
+          m.unread = false
+          n += 1
+        }
+      }
+      return n
     },
     async markMailRead(id, read) {
       const m = mails.find((x) => x.id === id)
@@ -824,6 +905,13 @@ export function createMockBridge(): WindowApi {
       if (args.autoTagEnabled !== undefined) savedSettings.autoTagEnabled = args.autoTagEnabled
       if (args.tagVocabulary !== undefined) savedSettings.tagVocabulary = args.tagVocabulary
       if (args.sendScope !== undefined) savedSettings.sendScope = args.sendScope
+      // V2.6：其余新增设置（uiStyle / launchAtLogin / dnd* / autoCheckUpdate / showRemoteImages …）
+      // 统一兜底：凡是在 AppSettings 里有的键就照抄（避免每加一个设置都要改 mock）
+      const savedRecord = savedSettings as unknown as Record<string, unknown>
+      for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+        if (value === undefined || key === 'apiKey') continue
+        if (key in savedRecord) savedRecord[key] = value
+      }
       return { ...savedSettings }
     },
     async summarizeMail(id: number): Promise<AiSummaryResult> {
@@ -887,7 +975,7 @@ export function createMockBridge(): WindowApi {
       if (flagged) mockFlagged.add(id)
       else mockFlagged.delete(id)
     },
-    async countMails(args?: { folder?: string; autoTags?: string[]; starredOnly?: boolean; labelIds?: number[] }) {
+    async countMails(args?: { folder?: string; autoTags?: string[]; starredOnly?: boolean; labelIds?: number[]; blockedOnly?: boolean }) {
       const list = await this.listMails({ ...args, limit: 100000, offset: 0 })
       return list.length
     },
@@ -919,6 +1007,10 @@ export function createMockBridge(): WindowApi {
       return out.sort((a, b) => a.ts - b.ts)
     },
     // ---- 待办（V2.3）：内存实现，供渲染层 E2E 勾选/持久化验证 ----
+    // V2.4 AI 模型列表（mock）：返回几个新模型，验证设置页下拉会刷新
+    async listAiModels() {
+      return ['deepseek-flash', 'deepseek-v3.2', 'deepseek-v4-pro']
+    },
     // V2.3 自动更新（mock）：检查 → 发现新版本 → 下载 → 已下载
     async getUpdateState() {
       return { ...mockUpdateState }
@@ -949,96 +1041,145 @@ export function createMockBridge(): WindowApi {
       mockUnsubscribed.add(id)
       return { ok: true, kind: 'one-click', detail: '已发送一键退订请求（mock）' }
     },
+    // ---- 待办（V2.4 备忘录式，mock）：内存实现，供渲染层 E2E 验证 ----
     async listTasks() {
-      const mails = await this.listMails({ limit: 20, offset: 0 })
       if (mockTasks.length === 0) {
         const now = Date.now()
         const DAY = 86_400_000
+        const first = mails[0]
         mockTasks.push(
           {
             id: 1,
-            messageId: mails[0]?.id ?? null,
-            title: '提交 Lab 0 报告',
-            dueTs: now - 2 * DAY,
-            source: 'summary',
+            title: '提交 Experiment 1 报告',
+            body: '实验数据已经跑完，把图 3 的误差线重画一下再交。',
+            dueTs: now - 2 * 86_400_000,
             done: false,
-            createdAt: now,
-            updatedAt: now,
-            subject: mails[0]?.subject ?? null,
-            fromName: mails[0]?.fromName ?? null
+            checklist: [
+              { id: 'c1', text: '重画图 3 误差线', done: true },
+              { id: 'c2', text: '补第 2 页的采样率说明', done: false }
+            ],
+            links: first
+              ? [
+                  {
+                    id: 1,
+                    taskId: 1,
+                    kind: 'mail',
+                    refId: String(first.id),
+                    label: first.subject,
+                    sub: [first.fromName, first.dateLabel].filter(Boolean).join(' · ') || null
+                  }
+                ]
+              : [],
+            createdAt: now - DAY,
+            updatedAt: now
           },
           {
             id: 2,
-            messageId: mails[1]?.id ?? null,
-            title: '预约图书馆座位',
-            dueTs: now + 3_600_000,
-            source: 'card',
+            title: '周五前把打印发票交给实验室',
+            body: '',
+            dueTs: null,
             done: false,
-            createdAt: now,
-            updatedAt: now,
-            subject: mails[1]?.subject ?? null,
-            fromName: mails[1]?.fromName ?? null
+            checklist: [],
+            links: [{ id: 2, taskId: 2, kind: 'datetime', refId: String(now + 4 * DAY), label: '周五前', sub: null }],
+            createdAt: now - DAY,
+            updatedAt: now
           },
           {
             id: 3,
-            messageId: null,
-            title: '手动记一件事（无截止）',
+            title: '已完成：选课确认',
+            body: '教务系统已确认，不再处理。',
             dueTs: null,
-            source: 'manual',
-            done: false,
-            createdAt: now,
-            updatedAt: now,
-            subject: null,
-            fromName: null
-          },
-          {
-            id: 4,
-            messageId: null,
-            title: '已经完成的事',
-            dueTs: now - DAY,
-            source: 'manual',
             done: true,
-            createdAt: now,
-            updatedAt: now,
-            subject: null,
-            fromName: null
+            checklist: [],
+            links: [],
+            createdAt: now - 2 * DAY,
+            updatedAt: now - DAY
           }
         )
       }
-      return mockTasks.map((t) => ({ ...t }))
+      return mockTasks.map((t) => ({ ...t, checklist: t.checklist.map((c) => ({ ...c })), links: t.links.map((l) => ({ ...l })) }))
     },
-    async createTask(args: { title: string; dueTs?: number | null; messageId?: number | null }) {
+    async getTask(id: number) {
+      const t = mockTasks.find((x) => x.id === id)
+      return t ? { ...t, links: t.links.map((l) => ({ ...l })) } : null
+    },
+    async createTask(args: { title?: string; body?: string; dueTs?: number | null; mailId?: number | null }) {
       const now = Date.now()
-      const task = {
+      const task: import('@shared/tasks').TaskItem = {
         id: mockTasks.reduce((n, t) => Math.max(n, t.id), 0) + 1,
-        messageId: args.messageId ?? null,
-        title: args.title,
+        title: String(args.title ?? '').trim() || '未命名待办',
+        body: String(args.body ?? ''),
         dueTs: args.dueTs ?? null,
-        source: 'manual' as const,
         done: false,
+        checklist: [],
+        links: [],
         createdAt: now,
-        updatedAt: now,
-        subject: null,
-        fromName: null
+        updatedAt: now
+      }
+      if (args.mailId) {
+        const mail = mails.find((m) => m.id === args.mailId)
+        if (mail) {
+          task.links.push({
+            id: mockTasks.reduce((n, t) => Math.max(n, ...t.links.map((l) => l.id), 0), 0) + 1,
+            taskId: task.id,
+            kind: 'mail',
+            refId: String(mail.id),
+            label: mail.subject,
+            sub: mail.fromName ?? null
+          })
+        }
       }
       mockTasks.push(task)
-      return { ...task }
+      return { ...task, links: task.links.map((l) => ({ ...l })) }
     },
-    async updateTask(args: { id: number; title?: string; dueTs?: number | null; done?: boolean }) {
+    async updateTask(args: {
+      id: number
+      title?: string
+      body?: string
+      dueTs?: number | null
+      done?: boolean
+      checklist?: import('@shared/tasks').TaskChecklistItem[]
+    }) {
       const t = mockTasks.find((x) => x.id === args.id)
       if (!t) throw new Error('task not found: ' + args.id)
-      if (args.title !== undefined) t.title = args.title
+      if (args.title !== undefined) t.title = String(args.title).trim() || '未命名待办'
+      if (args.body !== undefined) t.body = args.body
       if (args.dueTs !== undefined) t.dueTs = args.dueTs
       if (args.done !== undefined) t.done = args.done
+      if (args.checklist !== undefined) t.checklist = args.checklist.map((c) => ({ ...c, id: c.id ?? `c${Math.random()}` }))
       t.updatedAt = Date.now()
-      return { ...t }
+      return { ...t, checklist: t.checklist.map((c) => ({ ...c })), links: t.links.map((l) => ({ ...l })) }
     },
     async deleteTask(id: number) {
       const i = mockTasks.findIndex((x) => x.id === id)
       if (i >= 0) mockTasks.splice(i, 1)
     },
-    async rebuildTasks() {
-      return { messages: 0, tasks: mockTasks.length, skipped: 0 }
+    async addTaskLink(args: { taskId: number; kind: 'mail' | 'datetime'; refId: string; label?: string; sub?: string }) {
+      const t = mockTasks.find((x) => x.id === args.taskId)
+      if (!t) throw new Error('task not found: ' + args.taskId)
+      const existing = t.links.find((l) => l.kind === args.kind && l.refId === args.refId)
+      if (existing) {
+        existing.label = args.label ?? null
+        existing.sub = args.sub ?? null
+      } else {
+        t.links.push({
+          id: Date.now() % 100000,
+          taskId: t.id,
+          kind: args.kind,
+          refId: args.refId,
+          label: args.label ?? null,
+          sub: args.sub ?? null
+        })
+      }
+      t.updatedAt = Date.now()
+      return { ...t, links: t.links.map((l) => ({ ...l })), checklist: t.checklist.map((c) => ({ ...c })) }
+    },
+    async removeTaskLink(args: { taskId: number; linkId: number }) {
+      const t = mockTasks.find((x) => x.id === args.taskId)
+      if (!t) throw new Error('task not found: ' + args.taskId)
+      t.links = t.links.filter((l) => l.id !== args.linkId)
+      t.updatedAt = Date.now()
+      return { ...t, links: t.links.map((l) => ({ ...l })), checklist: t.checklist.map((c) => ({ ...c })) }
     },
     async tagCounts() {
       // 与主进程一致：按「每封邮件实际持有的标签」统计（DISTINCT message_id）

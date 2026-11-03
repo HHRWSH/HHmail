@@ -33,3 +33,14 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 .electron-cache*/
+# 临时脚本/中间产物
+tmp_*
+# electron-builder 本地缓存（不提交）
+.eb-cache/
+
+# 本地 Electron mock 运行数据（npm run dev:mock）
+.dev-userdata/
+.dev-tmp/
+.tmp-pack-smoke/
+.dev-userdata*/
+.dev-tmp*/

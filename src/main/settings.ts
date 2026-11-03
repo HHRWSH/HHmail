@@ -7,11 +7,13 @@ import {
   AI_PROVIDERS,
   DEFAULT_AI_PROVIDER_ID,
   defaultModelForProvider,
+  providerModels,
   resolveAiProvider,
   resolveBaseUrl,
   validateAiConfig
 } from '../shared/aiProviders'
 import type { AppSettings, SetSettingsArgs } from '../shared/types'
+import { normalizeUiStyle } from '../shared/uiStyles'
 import {
   DEFAULT_ASK_TOPK,
   DEFAULT_BRAND_NAME,
@@ -20,6 +22,8 @@ import {
   DEFAULT_SHOW_REMOTE_IMAGES,
   DEFAULT_DND_ENABLED,
   DEFAULT_AUTO_CHECK_UPDATE,
+  DEFAULT_UI_STYLE,
+  DEFAULT_LAUNCH_AT_LOGIN,
   DEFAULT_DND_START,
   DEFAULT_DND_END,
   DEFAULT_SUMMARY_PROMPT,
@@ -89,6 +93,8 @@ export const SETTINGS_KEY_TAG_VOCAB = 'tags.vocabulary'
 export const SETTINGS_KEY_SHOW_REMOTE_IMAGES = 'ui.show_remote_images'
 export const SETTINGS_KEY_DND_ENABLED = 'notify.dnd_enabled'
 export const SETTINGS_KEY_AUTO_CHECK_UPDATE = 'update.auto_check'
+export const SETTINGS_KEY_UI_STYLE = 'ui.style'
+export const SETTINGS_KEY_LAUNCH_AT_LOGIN = 'app.launch_at_login'
 export const SETTINGS_KEY_DND_START = 'notify.dnd_start'
 export const SETTINGS_KEY_DND_END = 'notify.dnd_end'
 
@@ -169,9 +175,18 @@ export class SafeStorageSettingsStore implements SettingsStore {
     const customBaseUrl = ((await this.readEnc(SETTINGS_KEY_CUSTOM_BASE_URL)) ?? '').trim()
     const modelRaw = ((await this.readEnc(SETTINGS_KEY_MODEL)) ?? '').trim()
     const fallbackModel = defaultModelForProvider(providerId) || DEEPSEEK_MODEL
-    const check = validateAiConfig(providerId, modelRaw)
+    // V2.4：允许自定义/新模型（只校验字符安全），但弃用名与非法名仍自愈成默认值
+    let model = fallbackModel
+    if (modelRaw) {
+      try {
+        validateAiModel(modelRaw, providerId)
+        model = modelRaw
+      } catch {
+        model = fallbackModel
+      }
+    }
+    void validateAiConfig
     // 存的是别的服务商的模型 / 已下线的模型名 → 落回该服务商默认模型并落盘
-    const model = modelRaw && check.ok ? modelRaw : fallbackModel
     if (model !== modelRaw && modelRaw !== '') {
       await this.writeEnc(SETTINGS_KEY_MODEL, fallbackModel).catch(() => undefined)
     }
@@ -225,6 +240,8 @@ export class SafeStorageSettingsStore implements SettingsStore {
       brandName: ((await this.readEnc(SETTINGS_KEY_BRAND_NAME)) ?? '').trim() || DEFAULT_BRAND_NAME,
       brandSubtitle: await this.readBrandSubtitle(),
       listPageSize: pickInt(await this.readEnc(SETTINGS_KEY_LIST_PAGE_SIZE), DEFAULT_LIST_PAGE_SIZE, 5, 200),
+      uiStyle: normalizeUiStyle(await this.readEnc(SETTINGS_KEY_UI_STYLE)),
+      launchAtLogin: (await this.readEnc(SETTINGS_KEY_LAUNCH_AT_LOGIN)) === '1',
       autoCheckUpdate:
         (await this.readEnc(SETTINGS_KEY_AUTO_CHECK_UPDATE)) === null
           ? DEFAULT_AUTO_CHECK_UPDATE
@@ -266,7 +283,9 @@ export class SafeStorageSettingsStore implements SettingsStore {
       const id = resolveAiProvider(args.aiProvider).id
       await this.writeEnc(SETTINGS_KEY_PROVIDER, id)
       const current = (await this.readEnc(SETTINGS_KEY_MODEL)) ?? ''
-      if (!validateAiConfig(id, current).ok) {
+      // V2.4：模型名基本只对某个服务商有效 —— 切服务商时，若当前模型不在新服务商的内置列表，
+      // 就回落到它的默认模型（用户仍可在设置页手填任意新模型）。
+      if (current && !providerModels(id).includes(current)) {
         const fallback = defaultModelForProvider(id)
         if (fallback) await this.writeEnc(SETTINGS_KEY_MODEL, fallback)
       }
@@ -346,6 +365,12 @@ export class SafeStorageSettingsStore implements SettingsStore {
     }
     if (args.autoTagEnabled !== undefined) {
       await this.writeEnc(SETTINGS_KEY_AUTO_TAG, args.autoTagEnabled ? '1' : '0')
+    }
+    if (args.uiStyle !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_UI_STYLE, normalizeUiStyle(args.uiStyle))
+    }
+    if (args.launchAtLogin !== undefined) {
+      await this.writeEnc(SETTINGS_KEY_LAUNCH_AT_LOGIN, args.launchAtLogin ? '1' : '0')
     }
     if (args.autoCheckUpdate !== undefined) {
       await this.writeEnc(SETTINGS_KEY_AUTO_CHECK_UPDATE, args.autoCheckUpdate ? '1' : '0')

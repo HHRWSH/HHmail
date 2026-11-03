@@ -46,6 +46,12 @@ export interface PageProps {
   unreadOnly?: boolean
   /** 按彩色类别筛选（V2.2：侧边栏「类别」） */
   categoryId?: number | null
+  /** V2.8 标题栏全局搜索词（收件箱消费） */
+  globalSearch?: string
+  /** V2.8 收件箱向标题栏注册命令（全部已读 / 同步 / 关闭详情） */
+  onInboxCommands?: (cmds: { markAllRead: () => void; sync: () => void; closeDetail: () => void } | null) => void
+  /** V2.8 收件箱状态回显（同步 / 标记 / 文案 / 详情是否打开） */
+  onInboxStatus?: (s: { syncing: boolean; marking: boolean; label: string; detailOpen: boolean } | null) => void
 }
 
 export interface FeatureEntry {

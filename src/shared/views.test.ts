@@ -18,6 +18,7 @@ function makeMail(overrides: Partial<MailListItem> = {}): MailListItem {
     labels: [{ id: 1, name: '课业', color: '#0a84ff' }],
     starred: false,
     snoozeUntil: null,
+  blocked: false,
     ...overrides
   }
 }

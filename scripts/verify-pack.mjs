@@ -42,15 +42,26 @@ if (!fs.existsSync(exe)) {
 }
 
 console.log("🚀 打包产物启动冒烟（mock 模式，不碰真实账号）…");
-const child = spawn(exe, ["--enable-logging", "--in-process-gpu", "--disable-gpu-compositing"], {
+// 冒烟用的临时目录放到工程内：某些受限环境（沙箱/CI）不允许写系统临时目录，
+// 而 Electron 的单实例锁 & SQLite 都写 userData，写不进去就会「启动即退出」。
+const smokeRoot = path.join(ROOT, ".tmp-pack-smoke");
+fs.rmSync(smokeRoot, { recursive: true, force: true });
+const smokeUserData = path.join(smokeRoot, "userdata");
+const smokeTmp = path.join(smokeRoot, "tmp");
+fs.mkdirSync(smokeUserData, { recursive: true });
+fs.mkdirSync(smokeTmp, { recursive: true });
+
+const child = spawn(exe, ["--enable-logging", "--in-process-gpu", "--disable-gpu-compositing", "--no-sandbox", "--disable-gpu"], {
   env: {
     ...process.env,
     HHMAIL_MOCK: "1",
     // CI runner（尤其 GitHub 的 Windows/macOS 机器）没有可用 GPU：
     // 强制软件渲染，否则 Electron 会在 GPU 初始化阶段直接 FATAL（本脚本曾因此在 CI 上误报失败）
     HHMAIL_DISABLE_GPU: "1",
-    // 用临时 userData：不要把冒烟测试的缓存/日志写进用户的 %APPDATA% / ~/Library
-    HHMAIL_USERDATA: fs.mkdtempSync(path.join(os.tmpdir(), "hhmail-pack-"))
+    // 用工程内临时 userData：不要把冒烟测试的缓存/日志写进用户的 %APPDATA% / ~/Library
+    HHMAIL_USERDATA: smokeUserData,
+    TEMP: smokeTmp,
+    TMP: smokeTmp
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -75,6 +86,11 @@ clearTimeout(timer);
 if (/NODE_MODULE_VERSION|unhandledRejection/.test(output)) {
   console.error("❌ 打包产物启动异常（疑似原生模块 ABI 不匹配）：\n" + output.slice(0, 2000));
   process.exit(1);
+}
+try {
+  fs.rmSync(smokeRoot, { recursive: true, force: true });
+} catch {
+  /* ignore */
 }
 if (!/app\.ready|db\.migrated/.test(output)) {
   console.error("❌ 打包产物未到达 app.ready（可能启动即崩溃）：\n" + output.slice(0, 2000));

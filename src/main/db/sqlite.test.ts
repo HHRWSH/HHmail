@@ -1125,12 +1125,13 @@ describe('SqliteMessageStore —— 真实 better-sqlite3 契约测试', () => {
   })
 })
 
-describe('SqliteMessageStore —— 待办（V2.3，独立库）', () => {
+
+describe('SqliteMessageStore —— 待办（V2.4 备忘录式，独立库）', () => {
   let taskDbPath: string
   let taskStore: SqliteMessageStore
 
   beforeAll(() => {
-    taskDbPath = path.join(os.tmpdir(), `mail-ai-tasks-test-${process.pid}-${Date.now()}.db`)
+    taskDbPath = path.join(os.tmpdir(), `mail-ai-memo-tasks-${process.pid}-${Date.now()}.db`)
     taskStore = new SqliteMessageStore(taskDbPath, new MemoryLogger())
   })
 
@@ -1145,68 +1146,120 @@ describe('SqliteMessageStore —— 待办（V2.3，独立库）', () => {
     }
   })
 
-  it('手动任务 CRUD + 勾选完成持久化', async () => {
+  it('新建 = 完全手动（空库默认无待办）；未命名会兜底', async () => {
+    expect(await taskStore.listTasks()).toEqual([])
     const created = await taskStore.createTask({ title: '去交材料' })
-    expect(created).toMatchObject({ title: '去交材料', done: false, source: 'manual', messageId: null })
-
-    const updated = await taskStore.updateTask(created.id, { done: true })
-    expect(updated.done).toBe(true)
-    expect((await taskStore.listTasks()).find((t) => t.id === created.id)?.done).toBe(true)
-
-    const withDue = await taskStore.updateTask(created.id, { title: '交材料（改）', dueTs: 123456 })
-    expect(withDue).toMatchObject({ title: '交材料（改）', dueTs: 123456, done: true })
-
-    await taskStore.deleteTask(created.id)
-    expect((await taskStore.listTasks()).find((t) => t.id === created.id)).toBeUndefined()
+    expect(created).toMatchObject({ title: '去交材料', body: '', done: false, dueTs: null })
+    expect(created.checklist).toEqual([])
+    expect(created.links).toEqual([])
+    const unnamed = await taskStore.createTask({})
+    expect(unnamed.title).toBe('未命名待办')
   })
 
-  it('replaceAutoTasks：替换 card/summary、保留手动任务', async () => {
-    await taskStore.upsertMessages([makeMsg(311, { subject: 'Lab 0 提交' })])
-    const mailId = (await taskStore.query({ limit: 2000, offset: 0 })).find((m) => m.uid === 311)?.id as number
-
-    await taskStore.replaceAutoTasks([mailId], [
-      { messageId: mailId, title: '提交 Lab 0', dueTs: 1000, done: false, source: 'summary' }
+  it('正文 / 截止 / 清单 / 完成 都能更新并持久化', async () => {
+    const t = await taskStore.createTask({ title: '写报告', dueTs: 1_890_000_000_000 })
+    const updated = await taskStore.updateTask(t.id, {
+      body: '第一行\n第二行',
+      done: true,
+      checklist: [
+        { id: 'c1', text: '画图', done: true },
+        { id: 'c2', text: '补说明', done: false }
+      ]
+    })
+    expect(updated).toMatchObject({ body: '第一行\n第二行', done: true, dueTs: 1_890_000_000_000 })
+    expect(updated.checklist).toEqual([
+      { id: 'c1', text: '画图', done: true },
+      { id: 'c2', text: '补说明', done: false }
     ])
-    const first = (await taskStore.tasksForMessages([mailId]))[0]
-    await taskStore.updateTask(first.id, { done: true })
-
-    const manual = await taskStore.createTask({ title: '手动：问 TA' })
-    await taskStore.replaceAutoTasks([mailId], [
-      { messageId: mailId, title: '提交 Lab 0', dueTs: 1000, done: false, source: 'summary' },
-      { messageId: mailId, title: '提交 Lab 1', dueTs: 2000, done: false, source: 'card' }
-    ])
-
-    const all = await taskStore.listTasks()
-    expect(all.filter((t) => t.source === 'manual').map((t) => t.id)).toContain(manual.id)
-    const auto = all.filter((t) => t.messageId === mailId)
-    expect(auto.map((t) => t.title).sort()).toEqual(['提交 Lab 0', '提交 Lab 1'])
+    // 重新读一遍（走新的 SQL 查询路径）
+    const again = await taskStore.getTask(t.id)
+    expect(again?.checklist).toHaveLength(2)
+    expect(again?.body).toContain('第二行')
   })
 
-  it('listTasks 关联邮件主题；getIndexDocsFor 带 subject；idsByUids 映射', async () => {
-    await taskStore.upsertMessages([makeMsg(321, { subject: '考试安排' })])
-    const id = (await taskStore.query({ limit: 2000, offset: 0 })).find((m) => m.uid === 321)?.id as number
-    await taskStore.saveIndexDoc({
-      messageId: id,
-      card: '[TYPE] 考试 | [DUE] 2026-09-20 09:00',
-      type: '考试',
-      course: null,
-      term: null,
-      dueTs: 1_890_000_000_000,
-      entities: [],
-      aliases: [],
-      questions: [],
-      model: 'test',
-      tags: []
-    } as never)
-    await taskStore.createTask({ title: '带邮件的手动任务', messageId: id })
+  it('引用：邮件（自动填主题/发件人）+ 自定义时间；可删除；重复添加幂等', async () => {
+    await taskStore.upsertMessages([makeMsg(411, { subject: 'Experiment 1 提交说明' })])
+    const mailId = (await taskStore.query({ limit: 2000, offset: 0 })).find((m) => m.uid === 411)?.id as number
+    const t = await taskStore.createTask({ title: '提交实验报告', mailId })
+    expect(t.links).toHaveLength(1)
+    expect(t.links[0]).toMatchObject({ kind: 'mail', refId: String(mailId), label: 'Experiment 1 提交说明' })
 
-    const docs = await taskStore.getIndexDocsFor([id])
-    expect(docs[0]).toMatchObject({ messageId: id, subject: '考试安排', dueTs: 1_890_000_000_000 })
+    const withTime = await taskStore.addTaskLink(t.id, {
+      kind: 'datetime',
+      refId: String(1_890_000_000_000),
+      label: '周五前',
+      sub: '自定义时间'
+    })
+    expect(withTime.links).toHaveLength(2)
 
-    const task = (await taskStore.listTasks()).find((t) => t.title === '带邮件的手动任务')
-    expect(task?.subject).toBe('考试安排')
+    // 重复添加同一条引用不产生重复行
+    const dup = await taskStore.addTaskLink(t.id, { kind: 'datetime', refId: String(1_890_000_000_000), label: '周五前' })
+    expect(dup.links.filter((l) => l.kind === 'datetime')).toHaveLength(1)
 
-    expect(await taskStore.idsByUids([321])).toEqual([id])
-    expect(await taskStore.idsByUids([999])).toEqual([])
+    // 删除引用
+    const timeLink = withTime.links.find((l) => l.kind === 'datetime') as { id: number }
+    const afterRemove = await taskStore.removeTaskLink(t.id, timeLink.id)
+    expect(afterRemove.links).toHaveLength(1)
+  })
+
+  it('删除待办连带删除引用', async () => {
+    const t = await taskStore.createTask({ title: '要删的' })
+    await taskStore.addTaskLink(t.id, { kind: 'datetime', refId: '123', label: 'x' })
+    await taskStore.deleteTask(t.id)
+    expect(await taskStore.getTask(t.id)).toBeNull()
+    expect((await taskStore.listTasks()).find((x) => x.id === t.id)).toBeUndefined()
+  })
+})
+
+
+describe('SqliteMessageStore —— 拦截发件人（V2.7，独立库）', () => {
+  let dbPath: string
+  let store2: SqliteMessageStore
+
+  beforeAll(() => {
+    dbPath = path.join(os.tmpdir(), `mail-ai-block-${process.pid}-${Date.now()}.db`)
+    store2 = new SqliteMessageStore(dbPath, new MemoryLogger())
+  })
+
+  afterAll(() => {
+    store2.close()
+    for (const suffix of ['', '-wal', '-shm']) {
+      try {
+        fs.rmSync(dbPath + suffix, { force: true })
+      } catch {
+        /* ignore */
+      }
+    }
+  })
+
+  it('加规则 → 命中邮件 blocked，默认列表排除、blockedOnly 只看被拦截', async () => {
+    await store2.upsertMessages([
+      makeMsg(501, { subject: '广告 A', fromAddr: 'ads@spam.com' }),
+      makeMsg(502, { subject: '正常邮件', fromAddr: 'teacher@school.edu' })
+    ])
+    expect((await store2.query({ limit: 10, offset: 0 })).length).toBe(2)
+    await store2.addBlockSender({ kind: 'domain', value: 'spam.com' })
+    const visible = await store2.query({ limit: 10, offset: 0 })
+    expect(visible.map((m) => m.subject)).toEqual(['正常邮件'])
+    const blocked = await store2.query({ limit: 10, offset: 0, blockedOnly: true })
+    expect(blocked.map((m) => m.subject)).toEqual(['广告 A'])
+    expect(await store2.countMails({ limit: 0, offset: 0 })).toBe(1)
+    expect(await store2.countMails({ limit: 0, offset: 0, blockedOnly: true })).toBe(1)
+  })
+
+  it('解除拦截后邮件回到主列表；email 规则只命中该地址', async () => {
+    await store2.addBlockSender({ kind: 'email', value: 'ta@example.com' })
+    await store2.upsertMessages([
+      makeMsg(503, { subject: 'TA 通知', fromAddr: 'ta@example.com' }),
+      makeMsg(504, { subject: '别人发来', fromAddr: 'other@example.com' })
+    ])
+    expect(await store2.applyBlockRules()).toBeGreaterThanOrEqual(1)
+    const visible = (await store2.query({ limit: 10, offset: 0 })).map((m) => m.subject)
+    expect(visible).toContain('别人发来')
+    expect(visible).not.toContain('TA 通知')
+    const rules = await store2.listBlockSenders()
+    for (const r of rules) await store2.removeBlockSender(r.id)
+    const after = (await store2.query({ limit: 10, offset: 0 })).map((m) => m.subject)
+    expect(after).toContain('TA 通知')
   })
 })

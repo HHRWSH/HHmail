@@ -1,6 +1,6 @@
 {
   "name": "hhmail",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "HHmail — 本地优先的学校邮箱 AI 助手：只读 IMAP + AI 摘要/问答 + 自动标签与彩色类别",
   "author": "HHmail",
@@ -10,6 +10,7 @@
     "dev": "npm run rebuild:electron && electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "dev:mock": "npm run rebuild:electron && node scripts/dev-mock.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run rebuild:node && vitest run",
     "test:e2e": "cd tests && npm test",
@@ -77,6 +78,9 @@
     },
     "nsis": {
       "oneClick": false,
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico",
       "allowToChangeInstallationDirectory": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },

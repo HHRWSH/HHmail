@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>L2 卡片流</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f4f5f7;color:#15171c;font-size:13px;overflow:hidden}
+.top{height:58px;background:#fff;border-bottom:1px solid #e7e9ee;display:flex;align-items:center;gap:10px;padding:0 22px}
+.top .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6f8cff,#22c1a4);display:grid;place-items:center;color:#fff;font-weight:800}
+.top .bn{font-weight:700;font-size:14px}
+.top .nav{display:flex;gap:4px;margin-left:20px}
+.top .nav span{padding:6px 12px;border-radius:99px;font-size:12.5px;color:#5b6270}
+.top .nav span.on{background:#eef2ff;color:#3b5bdb;font-weight:600}
+.top .sr{margin-left:auto;background:#f2f3f5;border-radius:99px;padding:8px 14px;color:#8a90a0;font-size:12px;min-width:260px}
+.feed{max-width:760px;margin:0 auto;height:calc(100vh - 58px);overflow:auto;padding:18px 20px 40px}
+.bar{display:flex;gap:8px;margin-bottom:14px}
+.bar .c{padding:6px 13px;border-radius:99px;background:#fff;border:1px solid #e7e9ee;font-size:12px;color:#5b6270}
+.bar .c.on{background:#15171c;color:#fff;border-color:#15171c;font-weight:600}
+.card{background:#fff;border:1px solid #e7e9ee;border-radius:18px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.card .hd{display:flex;align-items:center;gap:10px}
+.card .av{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px}
+.card .who{font-weight:700;font-size:12.5px}
+.card .tm{font-size:11px;color:#9aa1b0}
+.card .tg{margin-left:auto;font-size:10.5px;padding:3px 9px;border-radius:99px;background:#eef2ff;color:#3b5bdb;font-weight:600}
+.card h3{font-size:19px;font-weight:750;letter-spacing:-.2px;margin:12px 0 8px;line-height:1.35}
+.card p{color:#4a505c;line-height:1.7;font-size:13px}
+.card .bd{margin-top:10px;padding:12px 14px;background:#f7f8fa;border-radius:12px;font-size:12.5px;line-height:1.75;color:#3d434f}
+.card .att{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.card .att span{font-size:11px;background:#f2f3f5;border-radius:9px;padding:6px 10px;color:#4a505c}
+.card .acts{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #f0f1f4}
+.card .acts span{font-size:11.5px;padding:5px 11px;border-radius:9px;background:#f7f8fa;color:#4a505c}
+.card .acts span.p{background:#15171c;color:#fff;font-weight:600}
+.card.fold h3{font-size:16px;margin:10px 0 6px}
+.card.fold p{color:#6b7280;font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card.unread{box-shadow:0 1px 2px rgba(16,24,40,.04),inset 3px 0 0 #3b82f6}
+</style></head><body>
+<div class="top"><div class="logo">H</div><div class="bn">HHmail</div><div class="nav"><span class="on">收件箱</span><span class="">AI 助手</span><span class="">草稿箱</span><span class="">知识库</span><span class="">日历</span><span class="">待办</span><span class="">已发送</span></div><div class="sr">🔍 搜索邮件、联系人…</div></div>
+<div class="feed">
+  <div class="bar"><span class="c on">全部</span><span class="c">未读 3</span><span class="c">有附件</span><span class="c">重要</span><span class="c">已归档</span></div>
+  <div class="card unread">
+    <div class="hd"><div class="av" style="background:#3b82f6">林</div><div><div class="who">Prof. 林教授</div><div class="tm">今天 10:53 · 收件箱</div></div><span class="tg">论文</span></div>
+    <h3>关于毕业论文进度的沟通</h3><p>附件里是我整理的时间表，下周三前把初稿发我看看。</p>
+    <div class="bd">老师好，附件里是我整理的时间表，下周三前把初稿发我看看。<br>另外第 2 章的结构可以再压缩一些，重点放在实验部分。</div>
+    <div class="att"><span>📎 论文时间表.xlsx</span><span>📎 初稿模板.docx</span></div>
+    <div class="acts"><span class="p">↩ 回复</span><span>⭐ 星标</span><span>☑ 加入待办</span><span>✨ AI 总结</span><span>⋯</span></div>
+  </div>
+  <div class="card fold unread"><div class="hd"><div class="av" style="background:#0ea5e9">教</div><div><div class="who">教务处</div><div class="tm">09:20 · 收件箱</div></div><span class="tg">通知</span></div><h3>【重要】关于选课与学费缴费的通知</h3><p>本学期第二阶段选课将于 11 月 7 日 18:00 截止，请及时确认。</p></div><div class="card fold unread"><div class="hd"><div class="av" style="background:#8b5cf6">图</div><div><div class="who">图书馆</div><div class="tm">昨天 · 收件箱</div></div><span class="tg">附件</span></div><h3>CSE 系周会纪要 & 下周活动安排</h3><p>本周五 15:30 在 SHB 123 举行系周会，会后有茶歇。</p></div><div class="card fold "><div class="hd"><div class="av" style="background:#ef4444">IT</div><div><div class="who">IT 服务台</div><div class="tm">昨天 · 收件箱</div></div><span class="tg">通知</span></div><h3>您借阅的资源即将到期，请及时归还</h3><p>您借阅的《Computer Networks》将于 11 月 6 日到期。</p></div><div class="card fold "><div class="hd"><div class="av" style="background:#f59e0b">王</div><div><div class="who">王同学</div><div class="tm">周一 · 收件箱</div></div><span class="tg">通知</span></div><h3>组队需要：CSCI 540 期末 project</h3><p>看到你也在选这门课，方便的话我们组个队？</p></div>
+</div></body></html>

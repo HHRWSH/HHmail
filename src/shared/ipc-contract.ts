@@ -70,6 +70,19 @@ export const IPC_CHANNELS = {
   MAIL_SET_CATEGORY: 'mail:set-category',
   /** 红旗（V2.2）：设置/取消后续标记 */
   MAIL_SET_FLAGGED: 'mail:set-flagged',
+  /** 一键已读（V2.4）：把某文件夹全部未读标记为已读（只改本地） */
+  /** 鎷︽埅鍙戜欢浜猴紙V2.7锛?*/
+  /** 鑷畾涔夋爣棰樻爮鐨勭獥鍙ｆ帶鍒讹紙V2.8锛?*/
+  WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_IS_MAXIMIZED: 'window:is-maximized',
+  WINDOW_STATE: 'window:state',
+  MAIL_BLOCKLIST: 'mail:blocklist',
+  MAIL_BLOCK_SENDER: 'mail:block-sender',
+  MAIL_UNBLOCK_SENDER: 'mail:unblock-sender',
+  MAIL_UNBLOCK_ADDRESS: 'mail:unblock-address',
+  MAIL_MARK_ALL_READ: 'mail:mark-all-read',
   /** 当前筛选条件下的邮件总数（V2.2：列表只取前 N 封，但角标要显示真实总数） */
   MAIL_COUNT: 'mail:count',
   /** 日历：某时间范围内的事件（截止 + 卡片里提到的日期） */
@@ -82,12 +95,18 @@ export const IPC_CHANNELS = {
   UPDATE_INSTALL: 'update:install',
   /** 一键退订（V2.3）：按 List-Unsubscribe 头发起退订（https 一键 / https 打开浏览器 / mailto 发信） */
   MAIL_UNSUBSCRIBE: 'mail:unsubscribe',
+  /** AI 模型列表（V2.4）：拉服务商 /models 供设置页选择 */
+  AI_LIST_MODELS: 'ai:list-models',
   /** 待办（V2.3）：列表 / 新增 / 更新 / 删除 / 重建 */
+  /** 待办（V2.4 备忘录式）：列表 / 单张 / 新建 / 更新 / 删除 / 引用增删 */
   TASKS_LIST: 'tasks:list',
+  TASKS_GET: 'tasks:get',
   TASKS_CREATE: 'tasks:create',
   TASKS_UPDATE: 'tasks:update',
   TASKS_DELETE: 'tasks:delete',
-  TASKS_REBUILD: 'tasks:rebuild',
+  TASKS_LINK_ADD: 'tasks:link-add',
+  TASKS_LINK_REMOVE: 'tasks:link-remove',
+
   /** 自动标签（V2.2：A 规则映射 + B AI 主题标签 + 示例邮件） */
   TAGS_COUNTS: 'tags:counts',
   TAGS_EXAMPLES: 'tags:examples',
@@ -137,6 +156,8 @@ export interface ListMailsArgs {
   flaggedOnly?: boolean
   /** 只看未读（V2.2，未读筛选移到文件夹列表） */
   unreadOnly?: boolean
+  /** V2.7：只看被拦截的邮件（默认排除） */
+  blockedOnly?: boolean
   /** 按彩色类别筛选（V2.2） */
   categoryId?: number
   /** 自动标签过滤（V2.2；多标签 OR） */

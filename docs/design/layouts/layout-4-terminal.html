@@ -1,0 +1,48 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>L4 终端</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:"Cascadia Mono",Consolas,"JetBrains Mono",ui-monospace,monospace;background:#0b0c0e;color:#d6d9e0;font-size:12.5px;overflow:hidden}
+.cmd{height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #1c1f26;background:#0e1013}
+.cmd .p{color:#5eead4}
+.cmd .q{color:#8b93a7}
+.cmd .kbd{margin-left:auto;color:#6b7280;font-size:11px}
+.cmd .kbd b{color:#a78bfa}
+.layout{display:grid;grid-template-columns:58% 1fr;height:calc(100vh - 40px - 24px)}
+.table{overflow:auto;border-right:1px solid #1c1f26}
+.th,.tr{display:grid;grid-template-columns:18px 128px 1fr 64px 56px;align-items:center;gap:8px;padding:0 10px;height:31px}
+.th{position:sticky;top:0;background:#0e1013;border-bottom:1px solid #1c1f26;color:#6b7280;font-size:11px;letter-spacing:.4px}
+.tr{color:#c3c8d2;border-bottom:1px solid #14171d}
+.tr:nth-child(odd){background:#0d0f12}
+.tr.sel{background:#16213a;color:#e8ebf2;box-shadow:inset 2px 0 0 #5b8def}
+.tr .st{color:#5b8def}
+.tr .un{color:#5b8def}
+.tr .fr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr .sj{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr .at{color:#f0b45a;text-align:center}
+.tr .tm{color:#6b7280;text-align:right;font-size:11px}
+.pane{overflow:auto;padding:18px 20px}
+.pane h2{font-size:15px;font-weight:700;color:#f2f4f8;font-family:-apple-system,"PingFang SC",sans-serif}
+.meta2{margin:10px 0 16px;color:#8b93a7;font-size:11.5px;line-height:1.9;border-left:2px solid #1c1f26;padding-left:10px}
+.meta2 b{color:#c3c8d2;font-weight:600}
+.pane .body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;line-height:1.85;color:#c3c8d2;white-space:pre-wrap}
+.pane .att{margin-top:14px;color:#f0b45a;font-size:12px}
+.status{height:24px;display:flex;align-items:center;gap:16px;padding:0 16px;border-top:1px solid #1c1f26;background:#0e1013;color:#6b7280;font-size:11px}
+.status b{color:#8b93a7}
+.status .r{margin-left:auto}
+</style></head><body>
+<div class="cmd"><span class="p">hhmail&gt;</span><span class="q">搜索邮件…</span><span class="kbd"><b>⌘K</b> 命令 · <b>J/K</b> 移动 · <b>R</b> 回复 · <b>E</b> 归档</span></div>
+<div class="layout">
+  <div class="table">
+    <div class="th"><span></span><span>发件人</span><span>主题</span><span style="text-align:center">附件</span><span style="text-align:right">时间</span></div>
+    <div class="tr sel"><span class="st">●</span><span class="fr un">Prof. 林教授</span><span class="sj">关于毕业论文进度的沟通</span><span class="at">📎2</span><span class="tm">10:53</span></div><div class="tr "><span class="st">●</span><span class="fr un">教务处</span><span class="sj">【重要】关于选课与学费缴费的通知</span><span class="at">—</span><span class="tm">09:20</span></div><div class="tr "><span class="st">●</span><span class="fr un">图书馆</span><span class="sj">CSE 系周会纪要 & 下周活动安排</span><span class="at">📎1</span><span class="tm">昨天</span></div><div class="tr "><span class="st">○</span><span class="fr ">IT 服务台</span><span class="sj">您借阅的资源即将到期，请及时归还</span><span class="at">—</span><span class="tm">昨天</span></div><div class="tr "><span class="st">○</span><span class="fr ">王同学</span><span class="sj">组队需要：CSCI 540 期末 project</span><span class="at">—</span><span class="tm">周一</span></div>
+  </div>
+  <div class="pane">
+    <h2>关于毕业论文进度的沟通</h2>
+    <div class="meta2"><b>from:</b> Prof. 林教授 &lt;lin@link.cuhk.edu.hk&gt;<br><b>to:</b> me &nbsp;·&nbsp; <b>date:</b> 2026-11-03 10:53<br><b>attach:</b> 论文时间表.xlsx, 初稿模板.docx</div>
+    <div class="body">老师好，附件里是我整理的时间表，下周三前把初稿发我看看。
+
+另外第 2 章的结构可以再压缩一些，重点放在实验部分。</div>
+    <div class="att">📎 论文时间表.xlsx &nbsp; 📎 初稿模板.docx</div>
+  </div>
+</div>
+<div class="status"><span><b>收件箱</b> 12 封 · 未读 3</span><span>已选 1</span><span class="r">同步 10:58 · AI 已就绪 · 只读模式</span></div>
+</body></html>

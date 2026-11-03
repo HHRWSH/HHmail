@@ -1,0 +1,36 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;overflow:hidden}
+.win{height:100vh;display:flex;flex-direction:column}
+.chrome{height:40px;display:flex;align-items:center;padding:0 14px;gap:8px;font-size:12px;color:#6b7280;border-bottom:1px solid #e4e7ec}
+.chrome .dot{width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#4c8dff,#7c6cf6)}
+.chrome .sp{flex:1}
+.app{flex:1;display:flex;min-height:0}
+.nav{width:224px;border-right:1px solid #e4e7ec;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.ni{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#5f6470;font-size:13.5px}
+.ni .i{width:16px;height:16px;border-radius:4px;background:#c9ced9;flex:none}
+.ni.on{background:#e9f1ff;color:#14161b;font-weight:650;box-shadow:inset 2px 0 0 #0071e3}
+.ni.on .i{background:#0071e3}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.hd{display:flex;align-items:center;gap:14px;padding:18px 26px 8px}
+.hd h1{font-size:22px;font-weight:750;letter-spacing:-.2px}
+.search{margin-left:auto;display:flex;align-items:center;width:min(400px,48%);height:34px;padding:0 14px;border-radius:999px;background:#f1f2f5;color:#8a90a0;font-size:12.5px}
+.pill{height:34px;padding:0 18px;border-radius:999px;background:#0071e3;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center}
+.body{flex:1;overflow:auto;padding:8px 26px 40px}
+.grp{margin:18px 0 6px;font-size:12.5px;font-weight:700;padding:0 10px}
+.list{border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.row{display:flex;align-items:center;gap:18px;padding:14px 18px;border-bottom:1px solid #f0f1f4}
+.row:last-child{border-bottom:0}
+.row .txt{flex:1;min-width:0}
+.row .nm{font-size:13.5px;font-weight:600}
+.row .ds{font-size:12px;color:#8a90a0;margin-top:3px}
+.sel,.fld{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:8px;background:#f4f5f8;font-size:12.5px}
+.fld{min-width:170px}
+.tg{width:40px;height:22px;border-radius:999px;background:#c9ced9;position:relative;display:inline-block}
+.tg i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.tg.on{background:#0071e3}.tg.on i{left:21px}
+.styleblks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin-top:8px;background:#f4f5f8;border-radius:10px;overflow:hidden}
+.styleblk{padding:10px 12px;display:flex;flex-direction:column;gap:7px;font-size:12px;color:#5f6470}
+.styleblk.on{background:#e9f1ff;color:#14161b;font-weight:650;box-shadow:inset 0 -2px 0 #0071e3}
+.styleblk .sw{display:flex;gap:3px;height:8px}.styleblk .sw i{flex:1;height:8px}
+</style></head><body><div class="win"><div class="chrome"><span class="dot"></span><span>HHmail</span><span class="sp"></span><span>—</span><span>□</span><span>×</span></div><div class="app"><aside class="nav"><div class="ni on"><span class="i"></span>外观</div><div class="ni"><span class="i"></span>同步</div><div class="ni"><span class="i"></span>AI 与标签</div><div class="ni"><span class="i"></span>发信</div><div class="ni"><span class="i"></span>账户</div><div class="ni"><span class="i"></span>关于与数据</div></aside><main class="main"><div class="hd"><h1>设置</h1><div class="search">搜索设置</div><div class="pill">保存设置</div></div><div class="body"><div class="grp">常规</div><div class="list"><div class="row"><div class="txt"><div class="nm">主题</div><div class="ds">「跟随系统」随 Windows 自动切换</div></div><div class="ctl"><span class="sel">跟随系统 ▾</span></div></div><div class="row"><div class="txt"><div class="nm">界面密度</div><div class="ds">影响列表行高与正文字号</div></div><div class="ctl"><span class="sel">标准（默认） ▾</span></div></div><div class="row"><div class="txt"><div class="nm">视觉风格</div><div class="ds">亮/暗各一套，切换立即生效</div><div class="styleblks"><div class="styleblk on"><div class="sw"><i style="background:#f5f5f7"></i><i style="background:#ffffff"></i><i style="background:#0071e3"></i></div><span>Apple 原生</span></div><div class="styleblk"><div class="sw"><i style="background:#0b0c0f"></i><i style="background:#16171c"></i><i style="background:#7c8cf8"></i></div><span>Linear 工具</span></div><div class="styleblk"><div class="sw"><i style="background:#f7f6f3"></i><i style="background:#ffffff"></i><i style="background:#37352f"></i></div><span>Notion 暖白</span></div><div class="styleblk"><div class="sw"><i style="background:#faf6ef"></i><i style="background:#fffdf8"></i><i style="background:#b4532a"></i></div><span>纸张编辑</span></div><div class="styleblk"><div class="sw"><i style="background:#eef1ff"></i><i style="background:#ffffff"></i><i style="background:#7c3aed"></i></div><span>玻璃拟态</span></div></div></div></div></div><div class="grp">显示</div><div class="list"><div class="row"><div class="txt"><div class="nm">显示名称</div><div class="ds">侧边栏与窗口标题显示的名字</div></div><div class="ctl"><span class="fld">HHmail</span></div></div><div class="row"><div class="txt"><div class="nm">列表加载条数</div><div class="ds">一次加载多少封邮件</div></div><div class="ctl"><span class="fld">20</span></div></div><div class="row"><div class="txt"><div class="nm">时间显示</div><div class="ds">列表里显示相对时间</div></div><div class="ctl"><span class="tg on"><i></i></span></div></div><div class="row"><div class="txt"><div class="nm">打开即读</div><div class="ds">点开邮件时本地标记为已读</div></div><div class="ctl"><span class="tg on"><i></i></span></div></div></div></main></div></div></body></html>

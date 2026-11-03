@@ -38,6 +38,12 @@ interface Props {
   onViewsChanged?: () => void
   /** 本页面是否为激活页（V2.1：常驻挂载后，快捷键只在激活时响应） */
   isActive?: boolean
+  /** V2.8 标题栏全局搜索词（输入时同步到收件箱搜索框） */
+  globalSearch?: string
+  /** V2.8 标题栏注册收件箱命令（全部已读 / 立即同步） */
+  onInboxCommands?: (cmds: { markAllRead: () => void; sync: () => void; closeDetail: () => void } | null) => void
+  /** V2.8 收件箱状态回显（同步中 / 标记中 / 同步文案 / 详情是否打开） */
+  onInboxStatus?: (s: { syncing: boolean; marking: boolean; label: string; detailOpen: boolean } | null) => void
 }
 
 interface MailRowProps {
@@ -182,7 +188,10 @@ export const InboxPage = memo(function InboxPage({
   unreadOnly: unreadOnlyProp,
   categoryId,
   onLabelsChanged,
-  isActive = true
+  isActive = true,
+  globalSearch,
+  onInboxCommands,
+  onInboxStatus
 }: Props) {
   const settings = useSettings()
   const [mails, setMails] = useState<MailListItem[]>([])
@@ -191,6 +200,9 @@ export const InboxPage = memo(function InboxPage({
   /** 当前筛选条件下的真实总数（列表只取前若干封，角标要显示真实数量） */
   const [totalCount, setTotalCount] = useState(0)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  // V2.7 拦截：是否只看「已拦截」+ 当前文件夹被拦截数量（折叠提示用）
+  const [blockedOnly, setBlockedOnly] = useState(false)
+  const [blockedCount, setBlockedCount] = useState(0)
   const [searchTerm, setSearchTerm] = useState('')
   // V2.2：未读筛选以侧边栏 prop 为准（不再用本地 state —— 否则「红旗/未读」同时切换时，
   // 重新查询会用上一帧的旧值，出现"点了红旗却是 0 封"这类错位）
@@ -212,6 +224,8 @@ export const InboxPage = memo(function InboxPage({
   const [sync, setSync] = useState<SyncProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [shownCount, setShownCount] = useState(settings.listPageSize)
+  // V2.11: only reset pagination on filter/folder change, NOT on refresh (mark-read reload used to jump the list -> flicker)
+  const resetOnLoadRef = useRef(true)
   const [refreshSec, setRefreshSec] = useState<number | null>(null)
   // V2 M7：批量选择 + 批量工具栏（勾选框仅在「多选模式」下显示，右键进入）
   const [selection, setSelection] = useState<Set<number>>(new Set())
@@ -232,6 +246,8 @@ export const InboxPage = memo(function InboxPage({
   const syncingRef = useRef(false)
 
   const mailListRef = useRef<HTMLDivElement | null>(null)
+  // V2.7: keep current detail selection after mail state changes (e.g. blocked)
+  const keepSelectionRef = useRef(false)
 
   // V2.2 性能：渐进式分块渲染 —— 先渲染 40 行，滚到接近底部时哨兵进入视口再多渲染 40 行。
   // （旧实现按估算行高做窗口化：会留空白、行高估错时列表显示不全，加载更多还会跳回顶部。）
@@ -252,7 +268,8 @@ export const InboxPage = memo(function InboxPage({
   // 换文件夹/换筛选时回到第一屏
   useEffect(() => {
     setRenderLimit(40)
-  }, [folderPath, labelFilter, autoTagFilter, unreadOnly, categoryId])
+    resetOnLoadRef.current = true
+  }, [folderPath, labelFilter, autoTagFilter, unreadOnly, categoryId, blockedOnly])
 
   const loadList = useCallback(async (term: string) => {
     try {
@@ -267,9 +284,15 @@ export const InboxPage = memo(function InboxPage({
             starredOnly: labelFilter?.starredOnly,
             flaggedOnly: labelFilter?.flaggedOnly,
             categoryId: categoryId ?? undefined,
-            autoTags: tagFilters.length > 0 ? tagFilters : undefined
+            autoTags: tagFilters.length > 0 ? tagFilters : undefined,
+            blockedOnly
           })
       setMails(items)
+      // V2.7：顺便刷新「已拦截 N 封」的数量（折叠提示用）
+      void api
+        .countMails({ folder: folderPath, blockedOnly: true })
+        .then((n) => setBlockedCount(typeof n === 'number' ? n : 0))
+        .catch(() => undefined)
       // 角标显示真实总数（列表只取前 fetchLimit 封，之前会误显示成"共 200 封"）
       void api
         .countMails({
@@ -286,10 +309,22 @@ export const InboxPage = memo(function InboxPage({
       // 只有在「换筛选/换文件夹/刷新」时才回到第一屏；「加载更多」触发的重新拉取必须保留已展开行数
       if (!appendRef.current) setShownCount(settings.listPageSize)
       appendRef.current = false
-      setSelectedId((prev) => {
-        if (prev && items.some((m) => m.id === prev)) return prev
-        return items[0]?.id ?? null
-      })
+      // 选中项处理（V2.7）：被拦截/被筛选掉的邮件仍然存在于库里，详情不应跳到别的邮件；
+      // 只有邮件真的不存在了（被删/换文件夹）才回退到第一封。
+      const current = selectedIdRef.current
+      if (keepSelectionRef.current) {
+        keepSelectionRef.current = false
+      } else if (current && !items.some((m) => m.id === current)) {
+        const stillExists = await api
+          .getMail(current)
+          .then(() => true)
+          .catch(() => false)
+        setSelectedId(stillExists ? current : (items[0]?.id ?? null))
+      } else if (current) {
+        setSelectedId(current)
+      } else {
+        setSelectedId(items[0]?.id ?? null)
+      }
     } catch (e) {
       onToast(errorMessage(e))
     } finally {
@@ -299,7 +334,7 @@ export const InboxPage = memo(function InboxPage({
     // 之前漏了 tagFilters，loadList 一直闭包着最初的空数组，所以「按标签筛选」请求里
     // 根本没带标签条件（用户反馈"标签筛选无法正常运行"）。tagFilters 变化 → loadList 身份变化
     // → 上面依赖 loadList 的 effect 重新查列表。
-  }, [onToast, folderPath, labelFilter, tagFilters, unreadOnly, categoryId, settings.listPageSize])
+  }, [onToast, folderPath, labelFilter, tagFilters, unreadOnly, categoryId, blockedOnly, settings.listPageSize])
 
   // doSync 通过 ref 取「当前视图」的 loadList / 文件夹 / 搜索词，
   // 避免旧闭包在同步完成后把过期的列表写回（曾导致切文件夹后列表被旧收件箱数据覆盖）
@@ -307,6 +342,23 @@ export const InboxPage = memo(function InboxPage({
   loadListRef.current = loadList
   const folderPathRef = useRef(folderPath)
   folderPathRef.current = folderPath
+
+  // V2.4 一键已读：二次确认 → 主进程把当前文件夹全部未读标记为已读（只改本地）→ 刷新列表
+  const [markingAllRead, setMarkingAllRead] = useState(false)
+  const markAllRead = useCallback(async () => {
+    if (markingAllRead) return
+    if (!window.confirm('把当前文件夹里的所有未读邮件标记为已读？\n（只改本地状态，不会同步到服务器）')) return
+    setMarkingAllRead(true)
+    try {
+      const changed = (await api.markAllRead(folderPathRef.current)) as number
+      onToast(changed > 0 ? `已把 ${changed} 封邮件标记为已读` : '没有未读邮件')
+      await loadListRef.current(searchTermRef.current)
+    } catch (e) {
+      onToast(errorMessage(e))
+    } finally {
+      setMarkingAllRead(false)
+    }
+  }, [markingAllRead, onToast])
 
   const doSync = useCallback(async () => {
     // 防重入：首次进入 + 文件夹切换 effect 可能同时触发，串行化避免并发同步
@@ -465,6 +517,7 @@ export const InboxPage = memo(function InboxPage({
 
   // 稳定引用：避免 memo 失效导致 MailDetailPane 随列表重渲染
   const handleMailChanged = useCallback(() => {
+    keepSelectionRef.current = true
     void loadListRef.current(searchTermRef.current)
   }, [])
 
@@ -659,7 +712,6 @@ export const InboxPage = memo(function InboxPage({
   orderedRef.current = visible.slice(0, shownCount)
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const isActiveRef = useRef(isActive)
   isActiveRef.current = isActive
 
@@ -711,7 +763,8 @@ export const InboxPage = memo(function InboxPage({
           break
         case 'search':
           e.preventDefault()
-          searchInputRef.current?.focus()
+          // V2.8：搜索框已移到标题栏，按 / 直接聚焦它
+          document.querySelector<HTMLInputElement>('[data-testid="search-input"]')?.focus()
           break
         case 'unread': {
           const id = selectedIdRef.current
@@ -742,7 +795,18 @@ export const InboxPage = memo(function InboxPage({
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [handleShortcut])
 
-  /** 行渲染回调（稳定引用，配合 MailRow 的 memo） */
+  // V2.8：标题栏搜索 → 收件箱搜索（沿用现有 250ms debounce；非激活页时也不会丢词）
+  useEffect(() => {
+    if (globalSearch === undefined) return
+    setSearchTerm(globalSearch)
+  }, [globalSearch])
+
+  // V2.8：把「全部已读 / 立即同步」注册给标题栏，并把同步/标记状态回显到标题栏
+  const markAllReadRef = useRef(markAllRead)
+  markAllReadRef.current = markAllRead
+  const doSyncRef = useRef(doSync)
+  doSyncRef.current = doSync
+  /** 同步状态文案（V2.8：同时被收件箱 header 和标题栏使用） */
   const syncLabel = sync?.phase === 'done'
       ? refreshSec && refreshSec > 0
         ? `同步完成 · 每 ${refreshSec} 秒自动刷新`
@@ -752,6 +816,23 @@ export const InboxPage = memo(function InboxPage({
         : sync
           ? `${sync.phase === 'connecting' ? '连接中…' : sync.phase === 'full' ? '首次同步' : '增量同步'} ${sync.done}/${sync.total}`
           : ''
+  useEffect(() => {
+    onInboxCommands?.({
+      markAllRead: () => void markAllReadRef.current(),
+      sync: () => void doSyncRef.current(),
+      closeDetail: () => setSelectedId(null)
+    })
+    return () => onInboxCommands?.(null)
+  }, [onInboxCommands])
+  useEffect(() => {
+    onInboxStatus?.({
+      syncing: sync?.phase === 'connecting' || sync?.phase === 'full' || sync?.phase === 'incremental',
+      marking: markingAllRead,
+      label: syncLabel,
+      detailOpen: selectedId !== null
+    })
+  }, [sync, markingAllRead, syncLabel, selectedId, onInboxStatus])
+  /** 行渲染回调（稳定引用，配合 MailRow 的 memo） */
 
   return (
     <div className="inbox-wrap">
@@ -771,19 +852,6 @@ export const InboxPage = memo(function InboxPage({
           <span className="sub" data-testid="mail-total">
             {unreadCount > 0 ? `${unreadCount} 封未读` : `共 ${totalCount || mails.length} 封`}
           </span>
-        </div>
-        <div className="searchbox">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M16 16l4 4" />
-            </svg>
-            <input
-              ref={searchInputRef}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="搜索邮件…（主题/正文/发件人）"
-              data-testid="search-input"
-            />
         </div>
         {/* V2.2：标签筛选入口就放在搜索框旁边（用户反馈原来孤零零一行太占地方） */}
         <div className="topbar-tags" data-testid="tag-filter-bar">
@@ -808,12 +876,6 @@ export const InboxPage = memo(function InboxPage({
             </button>
           )}
         </div>
-        <button className="btn primary" onClick={() => void doSync()} data-testid="sync-btn">
-          ↻ 同步
-        </button>
-        <span className="sync-status" data-testid="sync-status">
-          {syncLabel}
-        </span>
       </header>
 
       {/* 批量总结进度：显示「正在生成哪一封 + 已用 + 停止」 */}
@@ -937,10 +999,41 @@ export const InboxPage = memo(function InboxPage({
           </div>
         )}
           <div className="mail-list" data-testid="mail-list" ref={mailListRef}>
+            {/* V2.7 拦截：折叠提示放在列表顶部（长列表底部看不到） */}
+            {!blockedOnly && blockedCount > 0 && (
+              <button
+                className="blocked-fold top"
+                onClick={() => {
+                  setBlockedOnly(true)
+                  setSelectedId(null)
+                }}
+                data-testid="blocked-fold"
+                title="被拦截发件人的邮件会折叠到「已拦截」（随时可解除拦截）"
+              >
+                🚫 已拦截 {blockedCount} 封（点击查看）
+              </button>
+            )}
             {loading ? (
               <div className="list-empty">正在加载…</div>
             ) : visible.length === 0 ? (
-              <div className="list-empty">暂无邮件</div>
+              <>
+                {blockedOnly && (
+                  <div className="blocked-view-bar" data-testid="blocked-view-bar">
+                    <span>正在查看「已拦截」邮件</span>
+                    <button
+                      className="link-btn"
+                      onClick={() => {
+                        setBlockedOnly(false)
+                        setSelectedId(null)
+                      }}
+                      data-testid="blocked-view-exit"
+                    >
+                      返回收件箱
+                    </button>
+                  </div>
+                )}
+                <div className="list-empty">{blockedOnly ? '没有被拦截的邮件' : '暂无邮件'}</div>
+              </>
             ) : (
               <>
                 {(() => {
@@ -1003,6 +1096,21 @@ export const InboxPage = memo(function InboxPage({
                     >
                       加载更多（本地还有 {Math.max(0, visible.length - shownCount)} 封
                       {totalCount > visible.length ? ` · 服务器共 ${totalCount} 封` : ''}）
+                    </button>
+                  </div>
+                )}
+                {blockedOnly && (
+                  <div className="blocked-view-bar" data-testid="blocked-view-bar">
+                    <span>正在查看「已拦截」邮件</span>
+                    <button
+                      className="link-btn"
+                      onClick={() => {
+                        setBlockedOnly(false)
+                        setSelectedId(null)
+                      }}
+                      data-testid="blocked-view-exit"
+                    >
+                      返回收件箱
                     </button>
                   </div>
                 )}

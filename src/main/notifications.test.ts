@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildNotificationBody, buildNotificationTitle, shouldNotifyNewMail, truncate } from './notifications'
+import {
+  buildNotificationBody,
+  buildNotificationTitle,
+  shouldNotifyNewMail,
+  truncate,
+  isNewMailBurst,
+  describeNewMailBurst,
+  NEW_MAIL_NOTIFY_BURST_THRESHOLD
+} from './notifications'
 import type { MailListItem } from '../shared/types'
 
 const item: MailListItem = {
@@ -17,6 +25,7 @@ const item: MailListItem = {
   labels: [],
   starred: false,
   snoozeUntil: null,
+  blocked: false,
 }
 
 describe('新邮件通知文案（纯函数）', () => {
@@ -80,5 +89,31 @@ describe('新邮件通知策略（真机反馈：自己点同步/摘要时不要
   it('没说来源时默认弹（宁可多提醒，不要漏掉新邮件）', () => {
     expect(shouldNotifyNewMail(undefined)).toBe(true)
     expect(shouldNotifyNewMail('')).toBe(true)
+  })
+})
+
+describe('新邮件过多时不弹通知（V2.4：订阅轰炸/批量转发）', () => {
+  it('阈值 5 封，超过才静默', () => {
+    expect(NEW_MAIL_NOTIFY_BURST_THRESHOLD).toBe(5)
+    expect(isNewMailBurst(1)).toBe(false)
+    expect(isNewMailBurst(5)).toBe(false)
+    expect(isNewMailBurst(6)).toBe(true)
+    expect(isNewMailBurst(30)).toBe(true)
+  })
+
+  it('阈值可配置；0 = 关闭该策略', () => {
+    expect(isNewMailBurst(6, 10)).toBe(false)
+    expect(isNewMailBurst(11, 10)).toBe(true)
+    expect(isNewMailBurst(999, 0)).toBe(false)
+  })
+
+  it('非法输入按 0 处理（不误静默）', () => {
+    expect(isNewMailBurst(Number.NaN)).toBe(false)
+    expect(isNewMailBurst(-3)).toBe(false)
+    expect(isNewMailBurst(2.9)).toBe(false)
+  })
+
+  it('静默日志文案带数量', () => {
+    expect(describeNewMailBurst(12)).toContain('12')
   })
 })

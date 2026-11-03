@@ -39,6 +39,8 @@ export const FALLBACK_SETTINGS: AppSettings = {
 
   showRemoteImages: true,
   autoCheckUpdate: true,
+  uiStyle: 'apple',
+  launchAtLogin: false,
   dndEnabled: false,
   dndStart: '23:00',
   dndEnd: '08:00',

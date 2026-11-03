@@ -1,0 +1,53 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>L3 看板</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#15171c;font-size:13px;overflow:hidden}
+.side{position:fixed;left:0;top:0;bottom:0;width:212px;background:#fff;border-right:1px solid #e7e9ee;padding:16px 12px}
+.brand{display:flex;gap:8px;align-items:center;margin-bottom:16px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6f8cff,#22c1a4);display:grid;place-items:center;color:#fff;font-weight:800}
+.brand b{font-size:13.5px}
+.ni{display:flex;gap:9px;align-items:center;padding:8px 10px;border-radius:9px;font-size:12.5px;color:#4a505c}
+.ni.on{background:#eef2ff;color:#3b5bdb;font-weight:600}
+.main{margin-left:212px;height:100vh;display:flex;flex-direction:column}
+.top{height:60px;display:flex;align-items:center;gap:10px;padding:0 22px;border-bottom:1px solid #e7e9ee;background:#fbfbfd}
+.top h1{font-size:17px;font-weight:750}
+.top .hint{font-size:11.5px;color:#8a90a0}
+.top .seg{margin-left:auto;display:flex;background:#eef0f4;border-radius:10px;padding:3px}
+.top .seg span{padding:5px 12px;border-radius:8px;font-size:12px;color:#5b6270}
+.top .seg span.on{background:#fff;font-weight:600;color:#15171c;box-shadow:0 1px 2px rgba(16,24,40,.08)}
+.board{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:18px 22px 24px;overflow:hidden}
+.col{background:#eff1f5;border-radius:16px;display:flex;flex-direction:column;min-height:0;padding:12px 10px}
+.col .ch{display:flex;align-items:center;gap:8px;padding:2px 6px 10px;font-size:12.5px;font-weight:700}
+.col .ch .c{margin-left:auto;font-size:10.5px;background:#fff;border-radius:99px;padding:1px 7px;color:#6b7280}
+.col .ch .bar{width:8px;height:8px;border-radius:99px}
+.col .body{overflow:auto;display:flex;flex-direction:column;gap:9px}
+.card{background:#fff;border:1px solid #e7e9ee;border-radius:12px;padding:11px 12px;box-shadow:0 1px 2px rgba(16,24,40,.04);cursor:grab}
+.card .hd{display:flex;gap:9px;align-items:center}
+.card .av{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;flex:none}
+.card .who{font-size:11.5px;font-weight:700}
+.card .tm{margin-left:auto;font-size:10px;color:#9aa1b0}
+.card .sub{font-size:12.5px;font-weight:600;margin:8px 0 4px;line-height:1.4}
+.card .sn{font-size:11.5px;color:#6b7280;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .tags{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
+.card .tags span{font-size:10px;padding:2px 7px;border-radius:99px;background:#f2f3f5;color:#6b7280}
+.card .tags .w{background:#fff4e5;color:#b45309;font-weight:600}
+.card .tags .d{background:#fee2e2;color:#b91c1c;font-weight:600}
+.empty{border:1.5px dashed #d5d9e0;border-radius:12px;padding:18px 10px;text-align:center;font-size:11.5px;color:#9aa1b0}
+</style></head><body>
+<aside class="side"><div class="brand"><div class="logo">H</div><b>HHmail</b></div><div class="ni on"><span>📥</span>收件箱</div><div class="ni "><span>✨</span>AI 助手</div><div class="ni "><span>✏️</span>草稿箱</div><div class="ni "><span>📚</span>知识库</div><div class="ni "><span>🗓</span>日历</div><div class="ni "><span>☑️</span>待办</div><div class="ni "><span>↗</span>已发送</div></aside>
+<div class="main">
+  <div class="top"><h1>邮件看板</h1><span class="hint">拖动卡片改变处理状态（待处理 / 等待回复 / 稍后 / 已归档）</span><div class="seg"><span class="on">看板</span><span>列表</span></div></div>
+  <div class="board">
+    <div class="col"><div class="ch"><span class="bar" style="background:#3b82f6"></span>待处理<span class="c">3</span></div><div class="body">
+      <div class="card"><div class="hd"><div class="av" style="background:#3b82f6">林</div><div class="who">Prof. 林教授</div><div class="tm">10:53</div></div><div class="sub">关于毕业论文进度的沟通</div><div class="sn">附件里是我整理的时间表，下周三前把初稿发我看看。</div><div class="tags"><span class="w">周三截止</span><span>📎 2</span></div></div>
+      <div class="card"><div class="hd"><div class="av" style="background:#0ea5e9">教</div><div class="who">教务处</div><div class="tm">09:20</div></div><div class="sub">【重要】关于选课与学费缴费的通知</div><div class="sn">第二阶段选课 11 月 7 日 18:00 截止。</div><div class="tags"><span class="d">今天截止</span></div></div>
+      <div class="card"><div class="hd"><div class="av" style="background:#f59e0b">王</div><div class="who">王同学</div><div class="tm">周一</div></div><div class="sub">组队需要：CSCI 540 期末 project</div><div class="sn">方便的话我们组个队？</div><div class="tags"><span>回复</span></div></div>
+    </div></div>
+    <div class="col"><div class="ch"><span class="bar" style="background:#f59e0b"></span>等待回复<span class="c">1</span></div><div class="body">
+      <div class="card"><div class="hd"><div class="av" style="background:#8b5cf6">图</div><div class="who">图书馆</div><div class="tm">昨天</div></div><div class="sub">CSE 系周会纪要 & 下周活动安排</div><div class="sn">本周五 15:30 SHB 123。</div><div class="tags"><span>周五</span></div></div>
+    </div></div>
+    <div class="col"><div class="ch"><span class="bar" style="background:#8b5cf6"></span>稍后<span class="c">1</span></div><div class="body">
+      <div class="card"><div class="hd"><div class="av" style="background:#ef4444">IT</div><div class="who">IT 服务台</div><div class="tm">昨天</div></div><div class="sub">您借阅的资源即将到期</div><div class="sn">《Computer Networks》11 月 6 日到期。</div><div class="tags"><span>无截止</span></div></div>
+    </div></div>
+    <div class="col"><div class="ch"><span class="bar" style="background:#9aa1b0"></span>已归档<span class="c">0</span></div><div class="body"><div class="empty">把处理完的邮件拖到这里</div></div></div>
+  </div>
+</div></body></html>

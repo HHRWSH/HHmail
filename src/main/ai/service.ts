@@ -234,6 +234,8 @@ export interface MailAiService {
   askInbox(question: string, opts?: AskInboxOptions): Promise<AskInboxResult>
   /** 当前实际使用的模型名（UI 显示用，避免写死）。 */
   modelName(): string
+  /** 拉取服务商最新的可用模型列表（V2.4：/models，用于设置页下拉与"自定义模型"） */
+  listModels(): Promise<string[]>
   // —— P1 预留：compose / reply / translate / classify 在此加方法，不碰收件箱逻辑 ——
 }
 
@@ -559,6 +561,13 @@ export class MailAiServiceImpl implements MailAiService {
 
   modelName(): string {
     return this.ai.modelName()
+  }
+
+  /** V2.4：拉取服务商最新模型列表（委托给底层 provider；不支持时给中文提示） */
+  async listModels(): Promise<string[]> {
+    const provider = this.ai as unknown as { listModels?: () => Promise<string[]> }
+    if (typeof provider.listModels === 'function') return provider.listModels()
+    throw new AppError(ErrorCodes.AI_NOT_CONFIGURED, '当前服务商不支持自动获取模型列表，请手动填写模型名。')
   }
 
   async summarize(thread: Thread, opts: SummarizeOptions = {}): Promise<Summary> {

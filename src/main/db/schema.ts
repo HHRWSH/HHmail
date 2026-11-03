@@ -477,6 +477,46 @@ export const SCHEMA_MIGRATIONS: readonly Migration[] = [
         created_at INTEGER NOT NULL
       )`
     ]
+  },
+  {
+    version: 22,
+    name: 'memo-tasks',
+    sql: [
+      // 待办改版（V2.4）：备忘录式 —— 标题 + 正文 + 清单 + 引用（邮件 / 自定义时间）。
+      // 用户要求「自己添加和删除」：不再从卡片 DUE / 摘要行动项自动生成，
+      // 升级时把旧版自动来源（source != 'manual'）的数据清掉，避免默认一堆不是自己建的任务。
+      `ALTER TABLE tasks ADD COLUMN body TEXT`,
+      `ALTER TABLE tasks ADD COLUMN checklist TEXT`,
+      `DELETE FROM tasks WHERE source IS NOT NULL AND source != 'manual'`,
+      `CREATE TABLE IF NOT EXISTS task_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        label TEXT,
+        sub TEXT,
+        created_at INTEGER NOT NULL
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_task_links_unique ON task_links(task_id, kind, ref_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_task_links_task ON task_links(task_id)`
+    ]
+  },
+  {
+    version: 23,
+    name: 'block-senders',
+    sql: [
+      // 拦截发件人（V2.7）：本地黑名单 + 折叠整理。
+      // 收信仍只读（不改服务器）；被拦截的邮件照常入库，只是本地打 blocked 标记、折叠到「已拦截」。
+      `ALTER TABLE messages ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_blocked ON messages(blocked)`,
+      `CREATE TABLE IF NOT EXISTS block_senders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        value TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_block_senders_unique ON block_senders(kind, value)`
+    ]
   }
 ] as const
 

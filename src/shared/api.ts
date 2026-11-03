@@ -1,5 +1,5 @@
 import type { CalendarEvent } from './calendar'
-import type { TaskItem } from './tasks'
+import type { TaskChecklistItem, TaskItem, TaskLinkKind } from './tasks'
 /**
  * window.api 白名单契约：preload 通过 contextBridge 暴露的能力全集。
  * renderer 只允许调用这里声明的方法；加能力 = 先在这里加方法，再在 preload 实现。
@@ -40,11 +40,13 @@ export class ApiError extends Error {
 }
 
 export interface WindowApi {
+  /** 杩愯骞冲彴锛堟爣棰樻爮鎹鍐冲畾鏄惁鑷粯绐楀彛鎸夐挳锛歐indows 鐢ㄨ嚜缁橈紝macOS 鐢ㄧ郴缁熺孩缁跨伅锛?*/
+  platform: 'win32' | 'darwin' | 'linux' | 'browser'
   getAuthStatus(): Promise<AuthStatus>
   startDeviceCode(): Promise<DeviceCodeInfo>
   onDeviceCodeEvent(cb: (event: DeviceCodeEvent) => void): () => void
   logout(): Promise<void>
-  listMails(args?: { limit?: number; offset?: number; folder?: string; labelIds?: number[]; starredOnly?: boolean; filter?: ViewFilter; sort?: ViewSort; autoTags?: string[]; flaggedOnly?: boolean; categoryId?: number }): Promise<MailListItem[]>
+  listMails(args?: { limit?: number; offset?: number; folder?: string; labelIds?: number[]; starredOnly?: boolean; filter?: ViewFilter; sort?: ViewSort; autoTags?: string[]; flaggedOnly?: boolean; categoryId?: number; blockedOnly?: boolean }): Promise<MailListItem[]>
   /** 邮箱文件夹列表（V2 M3） */
   listFolders(): Promise<MailFolder[]>
   getMail(id: number): Promise<MailDetail>
@@ -75,6 +77,7 @@ export interface WindowApi {
     categoryId?: number
     filter?: ViewFilter
     autoTags?: string[]
+    blockedOnly?: boolean
   }): Promise<number>
   /** 日历：取某时间范围内的事件（截止 + 卡片里提到的日期） */
   listEvents(args: { from: number; to: number }): Promise<CalendarEvent[]>
@@ -87,16 +90,31 @@ export interface WindowApi {
   onUpdateState(cb: (state: import('./update').UpdateState) => void): () => boolean
   /** 一键退订（V2.3）：按邮件头发起退订；返回本地记录的结果 */
   unsubscribe(messageId: number): Promise<{ ok: boolean; kind: string; detail: string }>
+  /** AI 模型列表（V2.4）：拉服务商最新模型列表（/models） */
+  listAiModels(): Promise<string[]>
   /** 待办（V2.3）：全部任务（含关联邮件主题/发件人） */
+  /** 待办（V2.4 备忘录式）：全部（含清单与引用） */
   listTasks(): Promise<TaskItem[]>
-  /** 待办：手动新增 */
-  createTask(args: { title: string; dueTs?: number | null; messageId?: number | null }): Promise<TaskItem>
-  /** 待办：更新（标题/截止/完成） */
-  updateTask(args: { id: number; title?: string; dueTs?: number | null; done?: boolean }): Promise<TaskItem>
-  /** 待办：删除 */
+  /** 单张待办卡 */
+  getTask(id: number): Promise<TaskItem | null>
+  /** 新建待办（可同时挂一封邮件引用） */
+  createTask(args: { title?: string; body?: string; dueTs?: number | null; mailId?: number | null }): Promise<TaskItem>
+  /** 更新待办（标题/正文/截止/完成/清单整表替换） */
+  updateTask(args: {
+    id: number
+    title?: string
+    body?: string
+    dueTs?: number | null
+    done?: boolean
+    checklist?: TaskChecklistItem[]
+  }): Promise<TaskItem>
+  /** 删除待办（连带引用） */
   deleteTask(id: number): Promise<void>
-  /** 待办：重建（不传 messageIds = 全量；返回写入的任务数） */
-  rebuildTasks(args?: { messageIds?: number[] }): Promise<{ messages: number; tasks: number; skipped: number }>
+  /** 加一条引用（邮件 / 自定义时间） */
+  addTaskLink(args: { taskId: number; kind: TaskLinkKind; refId: string; label?: string; sub?: string }): Promise<TaskItem>
+  /** 删除一条引用 */
+  removeTaskLink(args: { taskId: number; linkId: number }): Promise<TaskItem>
+
   /** 自动标签：各标签的邮件数 */
   tagCounts(): Promise<Array<{ tag: string; count: number; manual?: boolean }>>
   /** 自动标签：用户挑的示例邮件（给 AI 当参考） */
@@ -210,6 +228,23 @@ export interface WindowApi {
   /** 取消未触发的稍后提醒（V2 M6） */
   cancelSnooze(id: number): Promise<void>
   /** 批量标记已读/未读（只改本地；V2 M7） */
+  /** 一键已读（V2.4）：把某文件夹全部未读标记为已读，返回改动条数 */
+  /** 鑷畾涔夋爣棰樻爮锛圴2.8锛夛細绐楀彛鎺у埗 */
+  windowMinimize(): Promise<void>
+  /** 鍒囨崲鏈€澶у寲锛岃繑鍥炲垏鎹㈠悗鐨勭姸鎬?*/
+  windowToggleMaximize(): Promise<boolean>
+  windowClose(): Promise<void>
+  windowIsMaximized(): Promise<boolean>
+  onWindowState(cb: (maximized: boolean) => void): () => boolean
+  /** 鎷︽埅鍙戜欢浜猴紙V2.7锛夛細瑙勫垯鍒楄〃 */
+  blockSenders(): Promise<import('./blocklist').BlockSender[]>
+  /** 鎷︽埅涓€涓彂浠朵汉锛堝畬鏁撮偖绠辨垨鍩熷悕锛夛紝杩斿洖鏈€鏂拌鍒欏垪琛?*/
+  blockSender(args: { address: string; kind?: import('./blocklist').BlockKind }): Promise<import('./blocklist').BlockSender[]>
+  /** 鎸夎鍒?id 瑙ｉ櫎鎷︽埅 */
+  unblockSender(id: number): Promise<import('./blocklist').BlockSender[]>
+  /** 鎸夊彂浠朵汉瑙ｉ櫎鎷︽埅锛堝懡涓鍙戜欢浜虹殑鎵€鏈夎鍒欙級 */
+  unblockAddress(address: string): Promise<import('./blocklist').BlockSender[]>
+  markAllRead(folder?: string): Promise<number>
   bulkMarkRead(ids: number[], read: boolean): Promise<void>
   /** 批量加标签（并入现有标签；V2 M7） */
   bulkAddLabels(ids: number[], labelIds: number[]): Promise<void>
