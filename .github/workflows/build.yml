@@ -63,13 +63,13 @@ jobs:
           - os: windows-latest
             name: windows-x64
             eb: --win --x64
-          - os: macos-14             # Apple Silicon（M 系列）→ darwin-arm64
+          - os: macos-15             # Apple Silicon（M 系列）→ darwin-arm64
             name: macos-arm64
             eb: --mac --arm64
             allow_failure: false
           # Intel（darwin-x64）：GitHub 已退役 macos-13（Intel runner，作业会永远 queued），
-          # 所以改为在 Apple 芯片 runner 上**交叉构建**：准备 x64 的 Electron zip + 为 x64 重建原生模块。
-          - os: macos-14
+          # 所以改为在 Apple 芯片 runner（macos-15）上**交叉构建**：准备 x64 的 Electron zip + 为 x64 重建原生模块。
+          - os: macos-15
             name: macos-x64
             eb: --mac --x64
             prepare_arch: x64
