@@ -52,7 +52,10 @@ try {
   // 所以重试时**先试不带 GPU 参数**，失败后再退回到带参数的组合。
   const plainArgs = [outMain];
   const gpuSafeArgs = [outMain, "--in-process-gpu", "--disable-gpu-compositing", "--disable-software-rasterizer"];
-  const attemptArgs = [plainArgs, plainArgs, gpuSafeArgs, gpuSafeArgs];
+  // 受限环境（无 GPU / 无显示会话 / 沙箱）下 Electron 需要 --no-sandbox --disable-gpu 才能启动：
+  // 作为一次重试尝试，CI 上默认参数仍优先（保持真实用户启动路径的验证）
+  const sandboxSafeArgs = [outMain, "--no-sandbox", "--disable-gpu"];
+  const attemptArgs = [plainArgs, sandboxSafeArgs, plainArgs, gpuSafeArgs, sandboxSafeArgs, gpuSafeArgs];
   let lastError;
   for (let attempt = 1; attempt <= attemptArgs.length && !app; attempt++) {
     const args = attemptArgs[attempt - 1];
@@ -88,28 +91,103 @@ try {
       hasIpcRenderer: !!api && "ipcRenderer" in api
     };
   });
+  // 与 src/preload/index.ts 暴露的 window.api 保持一致（新增 IPC 时必须同步）
   const expected = [
-    "askInbox", "bulkAddLabels", "bulkMarkRead", "cancelSnooze", "createLabel", "deleteDraft", "deleteLabel",
-    "downloadAttachment", "getAuthStatus", "getMail", "getSettings", "listDrafts", "listEvents", "listFolders",
-    "listLabels", "listMails", "logout", "markMailRead", "onDeviceCodeEvent", "onNewMail",
-    "onSummaryProgress", "onSyncProgress", "openExternal", "probeSendCapability", "resyncMail", "saveDraft",
-    "cancelSummarize", "collectionMails", "indexStats", "listCollections", "setCollectionExcluded", "weeklyBrief", "listSentItems", "deleteSentItem", "saveSettings", "sendMail", "sendTestMail",
-    "searchMail", "setMailLabels", "snoozeMail", "startDeviceCode", "summarizeMail", "summarizePending", "syncMail",
+    "addTaskLink",
+    "askInbox",
+    "blockSender",
+    "blockSenders",
+    "bulkAddLabels",
+    "bulkMarkRead",
+    "cancelSnooze",
+    "cancelSummarize",
+    "categoryCounts",
+    "chatAsk",
+    "chatMessages",
+    "chatSessions",
+    "checkUpdate",
+    "clearManualTags",
+    "collectionMails",
+    "countMails",
+    "createCategory",
+    "createLabel",
+    "createTask",
+    "deleteCategory",
+    "deleteChatSession",
+    "deleteDraft",
+    "deleteLabel",
+    "deleteSentItem",
+    "deleteTask",
+    "downloadAttachment",
+    "downloadUpdate",
+    "getAuthStatus",
+    "getMail",
+    "getSettings",
+    "getTask",
+    "getUpdateState",
+    "indexStats",
+    "installUpdate",
+    "listAiModels",
+    "listCategories",
+    "listCollections",
+    "listDrafts",
+    "listEvents",
+    "listFolders",
+    "listLabels",
+    "listMails",
+    "listSentItems",
+    "listTasks",
+    "logout",
+    "markAllRead",
+    "markMailRead",
+    "newChatSession",
+    "onDeviceCodeEvent",
+    "onNewMail",
+    "onSummaryProgress",
+    "onSyncProgress",
+    "onUpdateState",
+    "onWindowState",
+    "openExternal",
+    "openPath",
+    "pickAttachments",
+    "pickDirectory",
+    "platform",
+    "probeSendCapability",
+    "rebuildTags",
+    "removeTaskLink",
+    "renameChatSession",
+    "resyncMail",
+    "saveAttachment",
+    "saveDraft",
+    "saveSettings",
+    "searchMail",
+    "sendMail",
+    "sendTestMail",
+    "setCollectionExcluded",
+    "setFlagged",
+    "setMailCategory",
+    "setMailLabels",
+    "setMailTagManual",
+    "setTagExample",
+    "snoozeMail",
+    "startDeviceCode",
+    "summarizeMail",
+    "summarizePending",
+    "syncMail",
+    "tagCounts",
+    "tagExamples",
     "toggleStar",
-    // M4 聊天式 AI 助手
-    "chatAsk", "chatMessages", "chatSessions", "clearManualTags", "deleteChatSession", "newChatSession", "renameChatSession",
-    // V2.2：附件保存到指定目录 + 目录选择/打开 + 自动标签
-    // V2.3：pickAttachments = 发信附件（主进程弹文件框读数）
-    "saveAttachment", "pickDirectory", "pickAttachments", "openPath",
-    // V2.3：自动更新 + 一键退订 + 待办（列表/新增/更新/删除/重建）
-    "getUpdateState", "checkUpdate", "downloadUpdate", "installUpdate", "onUpdateState",
+    "unblockAddress",
+    "unblockSender",
     "unsubscribe",
-    "listTasks", "createTask", "updateTask", "deleteTask", "rebuildTasks",
-    "tagCounts", "tagExamples", "setTagExample", "rebuildTags", "setMailTagManual",
-    // V2.2：红旗 + 真实总数 + 彩色类别
-    "setFlagged", "countMails", "listCategories", "categoryCounts", "createCategory", "updateCategory",
-    "deleteCategory", "setMailCategory"
-  ].sort();
+    "updateCategory",
+    "updateTask",
+    "weeklyBrief",
+    "windowClose",
+    "windowIsMaximized",
+    "windowMinimize",
+    "windowToggleMaximize"
+].sort();
   check("window.api 白名单齐全", apiKeys.hasApi && JSON.stringify(apiKeys.keys) === JSON.stringify(expected), apiKeys.keys.join(","));
   check("renderer 无 Node 能力泄漏", !apiKeys.hasRequire && !apiKeys.hasProcess && !apiKeys.hasIpcRenderer);
 
@@ -175,17 +253,26 @@ try {
   await window.click('[data-nav="settings"]');
   await window.waitForSelector('[data-testid="settings-page"]', { timeout: 5000 });
   check("设置页可打开", await window.isVisible('[data-testid="settings-page"]'));
-  // M1：检索索引卡片覆盖情况（设置页显示）
+  // M1：检索索引覆盖（设置页纯说明行已移除，改为直接查真实 IPC）
   await window.click('[data-testid="settings-section-ai"]');
   await window.waitForTimeout(300);
-  const indexStatsText = await window.$eval('[data-testid="index-stats"]', (el) => el.textContent || "").catch(() => "");
-  check("设置页显示检索索引覆盖", /已建 \d+\/\d+ 封/.test(indexStatsText), indexStatsText.slice(0, 40));
+  const indexStats = await window.evaluate(async () => {
+    try { return await window.api.indexStats() } catch { return null }
+  });
+  check(
+    "检索索引已建立（真实 IPC）",
+    !!indexStats && typeof indexStats.total === "number" && indexStats.total > 0,
+    JSON.stringify(indexStats)
+  );
 
   // 发送能力自检（真实 IPC，mock 模式下主进程直接返回结论，不发信）
   await window.click('[data-testid="settings-section-send"]');
   await window.waitForTimeout(300);
   await window.click('[data-testid="smtp-probe-btn"]');
-  await window.waitForSelector('[data-testid="smtp-probe-result"]', { timeout: 10000 });
+  await window.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="smtp-probe-result"]');
+    return el && (el.textContent || "").trim().length > 0;
+  }, null, { timeout: 10000 });
   const probeText = await window.$eval('[data-testid="smtp-probe-result"]', (el) => el.textContent || "").catch(() => "");
   check("发送能力自检返回授权结论（真实 IPC）", /授权|鉴权|发送/.test(probeText), probeText.slice(0, 50));
 
@@ -194,12 +281,18 @@ try {
   await window.fill('[data-testid="set-smtp-pass"]', "app-pass");
   await window.fill('[data-testid="set-smtp-to"]', "tester@example.com");
   await window.click('[data-testid="smtp-send-test-btn"]');
-  await window.waitForSelector('[data-testid="smtp-send-result"]', { timeout: 15000 });
+  await window.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="smtp-send-result"]');
+    return el && (el.textContent || "").trim().length > 0;
+  }, null, { timeout: 15000 });
   const sendText = await window.$eval('[data-testid="smtp-send-result"]', (el) => el.textContent || "").catch(() => "");
   check("发信测试经真实 IPC 返回中文结论", /已发送|失败|鉴权/.test(sendText), sendText.slice(0, 50));
   // 学校账号发信测试（真实 IPC + mock 传输层）
   await window.click('[data-testid="school-send-test-btn"]');
-  await window.waitForSelector('[data-testid="school-send-result"]', { timeout: 15000 });
+  await window.waitForFunction(() => {
+    const el = document.querySelector('[data-testid="school-send-result"]');
+    return el && (el.textContent || "").trim().length > 0;
+  }, null, { timeout: 15000 });
   const schoolText = await window.$eval('[data-testid="school-send-result"]', (el) => el.textContent || "").catch(() => "");
   check("学校账号发信测试经真实 IPC 返回结论", /已发送|失败|鉴权/.test(schoolText), schoolText.slice(0, 50));
 
